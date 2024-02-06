@@ -1,0 +1,5 @@
+*.tif
+*.xml
+*.vrt
+process.txt
+.idea
