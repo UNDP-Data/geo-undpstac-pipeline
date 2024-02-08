@@ -8,3 +8,4 @@ Pipfile
 Pipfile.lock
 test.py
 *.tmp
+__pycache__
