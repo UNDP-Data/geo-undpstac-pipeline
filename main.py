@@ -4,8 +4,7 @@ import logging
 import subprocess
 import datetime
 import tempfile
-# import lxml
-from lxml import etree
+import xml.etree.ElementTree as ET
 import requests
 from dotenv import load_dotenv
 from tqdm import tqdm
@@ -47,22 +46,9 @@ def download_nighttime_data(url, save_path):
 
 
 def reproject_and_convert_to_cog(date: datetime.datetime, input_path, output_path, timeout_event=None):
-    # options = gdal.WarpOptions(
-    #     format='COG',
-    #     outputType=gdal.GDT_Unknown,
-    #     srcSRS='EPSG:4326',
-    #     dstSRS='EPSG:3857',
-    #     resampleAlg=gdal.GRA_NearestNeighbour,
-    #     warpOptions=['NUM_THREADS=ALL_CPUS'],
-    #     warpMemoryLimit=0,
-    #     creationOptions=['BLOCKSIZE=256', 'OVERVIEWS=IGNORE_EXISTING', 'COMPRESS=ZSTD', 'PREDICTOR=YES', 'BIGTIFF=YES'],
-    #     multithread=True,
-    # )
-    # gdal.Warp(output_path, input_path, options=options)
-    # file_path = f'data/raw/SVDNB_npp_d{date.strftime("%Y%m%d")}.rade9d_sunfiltered.tif'
     year = date.strftime('%Y')
     month = int(date.strftime('%m'))
-    # make directory if it doesn't exist
+    # todo: Dev purposes make directory if it doesn't exist
     if not os.path.exists(f'data/cogs/{year}/{month}'):
         os.makedirs(f'data/cogs/{year}/{month}')
 
@@ -112,21 +98,39 @@ def create_vrt(input_path: str, year: int, month: int):
     :param month:
     :return:
     """
+
     try:
         if not os.path.exists(input_path):
             raise FileNotFoundError(f"File {input_path} does not exist")
         vrt_file = f'data/cogs/{year}/{month}/SVDNB_npp_rade9d_sunfiltered.vrt'
         if os.path.exists(vrt_file):
-            logger.info("VRT file already exists. Adding the input file as a new band...")
-            # Add the input file to the VRT file as a new band
-            gdal.BuildVRT(
-                vrt_file,
-                [
-                    vrt_file,
-                    input_path
-                ],
-                separate=True,
-            )
+            input_dataset = gdal.Open(input_path)
+            input_band = input_dataset.GetRasterBand(1)
+            # logger.info("VRT file already exists. Adding the input file as a new band...")
+            tree = ET.parse(vrt_file)
+            root = tree.getroot()
+            xSize = input_dataset.RasterXSize
+            ySize = input_dataset.RasterYSize
+            blockXSize = input_band.GetBlockSize()[0]
+            blockYSize = input_band.GetBlockSize()[1]
+            no_data_value = input_band.GetNoDataValue()
+            datatype = gdal.GetDataTypeName(input_band.DataType)
+            number_of_bands = gdal.Open(vrt_file).RasterCount
+            new_child_vrt = f"""
+            <VRTRasterBand dataType="{datatype}" band="{number_of_bands + 1}">
+            <NoDataValue>{no_data_value}</NoDataValue>
+                <ComplexSource resampling="near">
+                    <SourceFilename relativeToVRT="1">{input_path.split("/")[-1]}</SourceFilename>
+                    <SourceBand>1</SourceBand>
+                    <SourceProperties RasterXSize="{xSize}" RasterYSize="{ySize}" DataType="{datatype}" BlockXSize="{blockXSize}" BlockYSize="{blockYSize}" />
+                    <SrcRect xOff="0" yOff="0" xSize="{xSize}" ySize="{ySize}" />
+                    <DstRect xOff="0" yOff="0" xSize="{xSize}" ySize="{ySize}" />
+                    <NODATA>{no_data_value}</NODATA>
+                </ComplexSource>
+            </VRTRasterBand>
+            """
+            root.append(ET.fromstring(new_child_vrt))
+            tree.write(vrt_file)
         else:
             logger.info("VRT file does not exist yet. Creating one...")
             options = gdal.BuildVRTOptions(
@@ -193,7 +197,7 @@ def process_nighttime_data(date: datetime.datetime):
                 f'{ROOT_URL}SVDNB_npp_d{date.strftime("%Y%m%d")}.rade9d_sunfiltered.tif',
                 f'{temp_dir}/SVDNB_npp_d{date}.rade9d_sunfiltered.tif')
 
-            # TODO: Remove the following line as it is used for development purposes to avoid downloading the file every time
+            # TODO: Following line is only for Development purposes
             # copy to local file to temp dir
             # os.system(
             #     f'cp data/raw/SVDNB_npp_d{date.strftime("%Y%m%d")}.rade9d_sunfiltered.tif {temp_dir}/SVDNB_npp_d{date.strftime("%Y%m%d")}.rade9d_sunfiltered.tif')
@@ -220,8 +224,4 @@ def process_historical_nighttime_data(start_date: datetime.datetime, end_date: d
 
 
 if __name__ == "__main__":
-    # process_nighttime_data(date=datetime.datetime(2024, 2, 8))
-    # process_nighttime_data(2024, 2)
-    # reproject_and_convert_to_cog('data/raw/SVDNB_npp_d20240201.rade9d_sunfiltered.tif')
-    # create_vrt("data/cogs/2024/2/SVDNB_npp_d20240202.rade9d_sunfiltered_cog.tif", 2024, 2)
-    process_historical_nighttime_data(datetime.datetime(2024, 2, 1), datetime.datetime(2024, 2, 10))
+    process_nighttime_data(date=datetime.datetime(2024, 2, 2))

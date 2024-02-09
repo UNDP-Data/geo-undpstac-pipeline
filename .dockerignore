@@ -1,0 +1,11 @@
+*.tif
+*.xml
+*.vrt
+process.txt
+.idea
+.env
+Pipfile
+Pipfile.lock
+test.py
+*.tmp
+__pycache__
