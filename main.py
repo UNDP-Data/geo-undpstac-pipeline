@@ -11,7 +11,7 @@ from tqdm import tqdm
 from osgeo import gdal
 from azure.storage.blob import BlobServiceClient, BlobClient, ContainerClient
 
-from utils import blob_exists_in_azure
+from utils import blob_exists_in_azure, download_blob_from_azure
 
 load_dotenv()
 
@@ -102,11 +102,14 @@ def create_vrt(input_path: str, year: int, month: int):
     try:
         if not os.path.exists(input_path):
             raise FileNotFoundError(f"File {input_path} does not exist")
-        vrt_file = f'data/cogs/{year}/{month}/SVDNB_npp_rade9d_sunfiltered.vrt'
-        if os.path.exists(vrt_file):
+        vrt_file = f'{input_path.split("/")[-2]}/SVDNB_npp_rade9d_sunfiltered.vrt'
+        if blob_exists_in_azure(vrt_file):
+            # download the vrt file
+            logger.info(f"Downloading {vrt_file} from Azure")
+            download_blob_from_azure(vrt_file, f'{input_path}/{vrt_file.split("/")[-1]}')
             input_dataset = gdal.Open(input_path)
             input_band = input_dataset.GetRasterBand(1)
-            # logger.info("VRT file already exists. Adding the input file as a new band...")
+            logger.info("VRT file already exists. Adding the input file as a new band...")
             tree = ET.parse(vrt_file)
             root = tree.getroot()
             xSize = input_dataset.RasterXSize
@@ -210,6 +213,7 @@ def process_nighttime_data(date: datetime.datetime):
             # create_vrt from here
             create_vrt(f'{cog_path}/SVDNB_npp_d{date.strftime("%Y%m%d")}.rade9d_sunfiltered_cog.tif', date.year,
                        date.month)
+            upload_to_azure(f'{cog_path}/SVDNB_npp_rade9d_sunfiltered.vrt', f'cogs/{year}/{month}/SVDNB_npp_rade9d_sunfiltered.vrt')
 
 
 def process_historical_nighttime_data(start_date: datetime.datetime, end_date: datetime.datetime):
