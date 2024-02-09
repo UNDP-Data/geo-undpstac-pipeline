@@ -45,13 +45,7 @@ def download_nighttime_data(url, save_path):
     logger.info(f"Downloaded {url} to {save_path}")
 
 
-def reproject_and_convert_to_cog(date: datetime.datetime, input_path, output_path, timeout_event=None):
-    year = date.strftime('%Y')
-    month = int(date.strftime('%m'))
-    # todo: Dev purposes make directory if it doesn't exist
-    if not os.path.exists(f'data/cogs/{year}/{month}'):
-        os.makedirs(f'data/cogs/{year}/{month}')
-
+def reproject_and_convert_to_cog(input_path, output_path, timeout_event=None):
     reprojection_cmd = [
         'gdalwarp',
         '-s_srs', 'EPSG:4326',
@@ -153,7 +147,7 @@ def create_vrt(input_path: str, year: int, month: int):
 def upload_to_azure(local_path: str, blob_name: str):
     """
     Upload a file to Azure Blob Storage
-    :param local_path:
+    :param local_path: str - As we are using a temporary directory, the file will be deleted after the function is done
     :param blob_name:
     :return:
     """
