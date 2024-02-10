@@ -25,7 +25,13 @@ gdal.PushErrorHandler('CPLLoggingErrorHandler')
 ROOT_URL = "https://eogdata.mines.edu/nighttime_light/nightly/rade9d_sunfiltered/"
 
 
-def download_nighttime_data(url, save_path):
+def download_nighttime_data(url: str, save_path: str):
+    """
+    Download nighttime data
+    :param url: str
+    :param save_path: str
+    :return: None
+    """
     response = requests.get(url, stream=True)
     res_code = response.status_code
     if res_code != 200:
@@ -45,7 +51,14 @@ def download_nighttime_data(url, save_path):
     logger.info(f"Downloaded {url} to {save_path}")
 
 
-def reproject_and_convert_to_cog(input_path, output_path, timeout_event=None):
+def reproject_and_convert_to_cog(input_path: str, output_path: str, timeout_event=None):
+    """
+    Reproject and convert to COG
+    :param input_path: str
+    :param output_path: str
+    :param timeout_event: multiprocessing.Event
+    :return: None
+    """
     reprojection_cmd = [
         'gdalwarp',
         '-s_srs', 'EPSG:4326',
@@ -87,7 +100,7 @@ def reproject_and_convert_to_cog(input_path, output_path, timeout_event=None):
 def create_vrt(input_path: str, year: int, month: int):
     """
     Create a VRT file from the input file
-    :param input_path:
+    :param input_path: str. Path to the input file (COG)
     :param year:
     :param month:
     :return:
@@ -200,7 +213,7 @@ def process_nighttime_data(date: datetime.datetime):
             #     f'cp data/raw/SVDNB_npp_d{date.strftime("%Y%m%d")}.rade9d_sunfiltered.tif {temp_dir}/SVDNB_npp_d{date.strftime("%Y%m%d")}.rade9d_sunfiltered.tif')
             # check if the file exists
             raw_file = f'{temp_dir}/SVDNB_npp_d{date.strftime("%Y%m%d")}.rade9d_sunfiltered.tif'
-            reproject_and_convert_to_cog(date, input_path=raw_file,
+            reproject_and_convert_to_cog(input_path=raw_file,
                                          output_path=f'{cog_path}/SVDNB_npp_d{date.strftime("%Y%m%d")}.rade9d_sunfiltered_cog.tif')
             upload_to_azure(f'{cog_path}/SVDNB_npp_d{date.strftime("%Y%m%d")}.rade9d_sunfiltered_cog.tif',
                             f'cogs/{year}/{month}/SVDNB_npp_d{date.strftime("%Y%m%d")}.rade9d_sunfiltered_cog.tif')
