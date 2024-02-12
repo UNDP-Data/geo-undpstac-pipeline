@@ -6,10 +6,11 @@ import aiofiles
 import traceback
 import tqdm
 
-
-
 logger = logging.getLogger(__name__)
-async def download_file(file_url=None, no_attempts=3, connect_timeout=5, data_read_timeout=900,read_chunk_size=1024*10 ):
+
+
+async def download_file(file_url=None, no_attempts=3, connect_timeout=5, data_read_timeout=900,
+                        read_chunk_size=1024 * 10):
     """
     https://eogdata.mines.edu/nighttime_light/nightly/rade9d_sunfiltered/SVDNB_npp_d20240206.rade9d_sunfiltered.tif
     :param file_url:
@@ -28,14 +29,14 @@ async def download_file(file_url=None, no_attempts=3, connect_timeout=5, data_re
                     timeout = aiohttp.ClientTimeout(connect=connect_timeout,
                                                     sock_read=data_read_timeout)
 
-
                     async with aiohttp.ClientSession(timeout=timeout) as session:
                         async with session.get(file_url, timeout=data_read_timeout) as response:
                             if response.status == 200:
                                 # For large files use response.content.read(chunk_size) instead.
 
                                 remote_size = int(response.headers['Content-Length'])
-                                progressbar = tqdm.tqdm(total=remote_size, desc=local_file_path, unit='iB', unit_scale=True)
+                                progressbar = tqdm.tqdm(total=remote_size, desc=local_file_path, unit='iB',
+                                                        unit_scale=True)
 
                                 async with aiofiles.open(local_file_path, 'wb') as local_file:
                                     while True:
@@ -57,12 +58,12 @@ async def download_file(file_url=None, no_attempts=3, connect_timeout=5, data_re
                                 # This is included for downloaders that created their url list procedurally, so it
                                 # can contain files that are not yet available on the server.
                                 logger.error(f"GET request failed for url {file_url}, with status code 404 in"
-                                                  f" attempt {attempt}. No new attempts will be made to download "
-                                                  f"this file. \n Response: {response.text}")
+                                             f" attempt {attempt}. No new attempts will be made to download "
+                                             f"this file. \n Response: {response.text}")
                                 break
                             else:
                                 logger.error(f'GET request failed for url {file_url} with status code '
-                                                  f'{response.status} in attempt {attempt}.')
+                                             f'{response.status} in attempt {attempt}.')
                                 continue
 
                 except Exception as e:
@@ -82,5 +83,6 @@ async def download_file(file_url=None, no_attempts=3, connect_timeout=5, data_re
 
 if __name__ == '__main__':
     import asyncio
+
     file_url = 'https://eogdata.mines.edu/nighttime_light/nightly/rade9d_sunfiltered/SVDNB_npp_d20240206.rade9d_sunfiltered.tif'
     asyncio.run(download_file(file_url=file_url))

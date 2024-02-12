@@ -33,10 +33,7 @@ def download_nighttime_data(url: str, save_path: str):
     :return: None
     """
     response = requests.get(url, stream=True)
-    res_code = response.status_code
-    if res_code != 200:
-        logger.error(f"Failed to download {url} with status code {res_code}")
-    # response.raise_for_status()
+    response.raise_for_status() # raise an exception if the request fails.
     total_size = int(response.headers.get('content-length', 0))
     block_size = 1024  # 1 KB
     progress_bar = tqdm(total=total_size, unit='iB', unit_scale=True)
@@ -191,36 +188,38 @@ def process_nighttime_data(date: datetime.datetime):
     :param date:  datetime.datetime
     :return: None
     """
-    if not date:  # if date is not provided, use today's date
-        date = datetime.datetime.now().strftime('%Y%m%d')
+    # if not date:  # if date is not provided, use today's date
+    #     date = datetime.datetime.now().strftime('%Y%m%d')
     ROOT_FOLDER = 'data'
     year = date.strftime('%Y')
     month = int(date.strftime('%m'))
-    print(f'{ROOT_FOLDER}/cogs/{year}/{month}/SVDNB_npp_d{date}.rade9d_sunfiltered_cog.tif')
-    if not blob_exists_in_azure(f'{ROOT_FOLDER}/cogs/{year}/{month}/SVDNB_npp_d{date}.rade9d_sunfiltered_cog.tif'):
-        logger.info(f"Downloading data for {date.strftime('%Y-%m-%d')}")
-        with tempfile.TemporaryDirectory() as temp_dir:
-            cog_path = f'{temp_dir}/cogs/{year}/{month}'
-            if not os.path.exists(cog_path):
-                os.makedirs(cog_path)
-            download_nighttime_data(
-                f'{ROOT_URL}SVDNB_npp_d{date.strftime("%Y%m%d")}.rade9d_sunfiltered.tif',
-                f'{temp_dir}/SVDNB_npp_d{date}.rade9d_sunfiltered.tif')
+    try:
+        if not blob_exists_in_azure(f'{ROOT_FOLDER}/cogs/{year}/{month}/SVDNB_npp_d{date}.rade9d_sunfiltered_cog.tif'):
+            logger.info(f"Retrieving raw data for {date.strftime('%Y-%m-%d')}")
+            with tempfile.TemporaryDirectory() as temp_dir:
+                cog_path = f'{temp_dir}/cogs/{year}/{month}'
+                if not os.path.exists(cog_path):
+                    os.makedirs(cog_path)
+                # download_nighttime_data(
+                #     f'{ROOT_URL}SVDNB_npp_d{date.strftime("%Y%m%d")}.rade9d_sunfiltered.tif',
+                #     f'{temp_dir}/SVDNB_npp_d{date}.rade9d_sunfiltered.tif')
 
-            # TODO: Following line is only for Development purposes
-            # copy to local file to temp dir
-            # os.system(
-            #     f'cp data/raw/SVDNB_npp_d{date.strftime("%Y%m%d")}.rade9d_sunfiltered.tif {temp_dir}/SVDNB_npp_d{date.strftime("%Y%m%d")}.rade9d_sunfiltered.tif')
-            # check if the file exists
-            raw_file = f'{temp_dir}/SVDNB_npp_d{date.strftime("%Y%m%d")}.rade9d_sunfiltered.tif'
-            reproject_and_convert_to_cog(input_path=raw_file,
-                                         output_path=f'{cog_path}/SVDNB_npp_d{date.strftime("%Y%m%d")}.rade9d_sunfiltered_cog.tif')
-            upload_to_azure(f'{cog_path}/SVDNB_npp_d{date.strftime("%Y%m%d")}.rade9d_sunfiltered_cog.tif',
-                            f'cogs/{year}/{month}/SVDNB_npp_d{date.strftime("%Y%m%d")}.rade9d_sunfiltered_cog.tif')
-            # create_vrt from here
-            create_vrt(f'{cog_path}/SVDNB_npp_d{date.strftime("%Y%m%d")}.rade9d_sunfiltered_cog.tif', date.year,
-                       date.month)
-            upload_to_azure(f'{cog_path}/SVDNB_npp_rade9d_sunfiltered.vrt', f'cogs/{year}/{month}/SVDNB_npp_rade9d_sunfiltered.vrt')
+                # TODO: Following line is only for Development purposes
+                # copy to local file to temp dir
+                os.system(
+                    f'cp data/raw/SVDNB_npp_d{date.strftime("%Y%m%d")}.rade9d_sunfiltered.tif {temp_dir}/SVDNB_npp_d{date.strftime("%Y%m%d")}.rade9d_sunfiltered.tif')
+                # check if the file exists
+                raw_file = f'{temp_dir}/SVDNB_npp_d{date.strftime("%Y%m%d")}.rade9d_sunfiltered.tif'
+                reproject_and_convert_to_cog(input_path=raw_file,
+                                             output_path=f'{cog_path}/SVDNB_npp_d{date.strftime("%Y%m%d")}.rade9d_sunfiltered_cog.tif')
+                upload_to_azure(f'{cog_path}/SVDNB_npp_d{date.strftime("%Y%m%d")}.rade9d_sunfiltered_cog.tif',
+                                f'cogs/{year}/{month}/SVDNB_npp_d{date.strftime("%Y%m%d")}.rade9d_sunfiltered_cog.tif')
+                # create_vrt from here
+                create_vrt(f'{cog_path}/SVDNB_npp_d{date.strftime("%Y%m%d")}.rade9d_sunfiltered_cog.tif', date.year,
+                           date.month)
+                upload_to_azure(f'{cog_path}/SVDNB_npp_rade9d_sunfiltered.vrt', f'cogs/{year}/{month}/SVDNB_npp_rade9d_sunfiltered.vrt')
+    except Exception as e:
+        logger.error(f"Failed to process data for {date.strftime('%Y-%m-%d')}: {e}")
 
 
 def process_historical_nighttime_data(start_date: datetime.datetime, end_date: datetime.datetime):

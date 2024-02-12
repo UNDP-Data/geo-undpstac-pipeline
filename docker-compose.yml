@@ -1,4 +1,11 @@
 services:
   app:
-    env_file:
-      - .env
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python cli.py
+    volumes:
+      - .:/app
+    environment:
+      - AZURE_STORAGE_CONNECTION_STRING=${AZURE_STORAGE_CONNECTION_STRING}
+      - AZURE_STORAGE_CONTAINER=${AZURE_STORAGE_CONTAINER}
