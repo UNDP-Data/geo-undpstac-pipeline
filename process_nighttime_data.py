@@ -200,14 +200,14 @@ def process_nighttime_data(date: datetime.datetime):
                 cog_path = f'{temp_dir}/cogs/{year}/{month}'
                 if not os.path.exists(cog_path):
                     os.makedirs(cog_path)
-                # download_nighttime_data(
-                #     f'{ROOT_URL}SVDNB_npp_d{date.strftime("%Y%m%d")}.rade9d_sunfiltered.tif',
-                #     f'{temp_dir}/SVDNB_npp_d{date}.rade9d_sunfiltered.tif')
+                download_nighttime_data(
+                    f'{ROOT_URL}SVDNB_npp_d{date.strftime("%Y%m%d")}.rade9d_sunfiltered.tif',
+                    f'{temp_dir}/SVDNB_npp_d{date}.rade9d_sunfiltered.tif')
 
                 # TODO: Following line is only for Development purposes
                 # copy to local file to temp dir
-                os.system(
-                    f'cp data/raw/SVDNB_npp_d{date.strftime("%Y%m%d")}.rade9d_sunfiltered.tif {temp_dir}/SVDNB_npp_d{date.strftime("%Y%m%d")}.rade9d_sunfiltered.tif')
+                # os.system(
+                #     f'cp data/raw/SVDNB_npp_d{date.strftime("%Y%m%d")}.rade9d_sunfiltered.tif {temp_dir}/SVDNB_npp_d{date.strftime("%Y%m%d")}.rade9d_sunfiltered.tif')
                 # check if the file exists
                 raw_file = f'{temp_dir}/SVDNB_npp_d{date.strftime("%Y%m%d")}.rade9d_sunfiltered.tif'
                 reproject_and_convert_to_cog(input_path=raw_file,
