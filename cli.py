@@ -15,7 +15,7 @@ def main():
     args = parser.parse_args()
 
     # if no date is provided, use yesterday's date
-    if not any([args.year, args.month, args.day]):
+    if not any([args.year, args.month, args.day]): # None of the arguments is provided
         process_nighttime_data(datetime.datetime.now() - datetime.timedelta(days=1))
     elif not all([args.year, args.month, args.day]):
         raise ValueError('If you provide a date, you must provide the year, month, and day')
