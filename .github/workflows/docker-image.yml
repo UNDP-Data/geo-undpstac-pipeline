@@ -16,8 +16,8 @@ jobs:
       contents: read
       packages: write
     steps:
-    -name: print
-      run: echo "$IMAGE_NAME"
+    - name: print
+      run: echo "${{ env.IMAGE_NAME }}"
     - name: Check out the code
       uses: actions/checkout@v3
     - name: Log into ACR
