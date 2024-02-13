@@ -11,7 +11,7 @@ from tqdm import tqdm
 from osgeo import gdal
 from azure.storage.blob import BlobServiceClient, BlobClient, ContainerClient
 
-from utils import blob_exists_in_azure, download_blob_from_azure
+from utils import blob_exists_in_azure, download_blob_from_azure, get_blob_metadata_from_azure, set_metadata_in_azure
 
 load_dotenv()
 
@@ -33,7 +33,7 @@ def download_nighttime_data(url: str, save_path: str):
     :return: None
     """
     response = requests.get(url, stream=True)
-    response.raise_for_status() # raise an exception if the request fails.
+    response.raise_for_status()  # raise an exception if the request fails.
     total_size = int(response.headers.get('content-length', 0))
     block_size = 1024  # 1 KB
     progress_bar = tqdm(total=total_size, unit='iB', unit_scale=True)
@@ -182,6 +182,20 @@ def upload_to_azure(local_path: str, blob_name: str):
         raise e
 
 
+def check_download_need(blob_name: str, remote_file_url: str) -> bool:
+    if not blob_exists_in_azure(blob_name):
+        return True
+    else:
+        # remote file size
+        remote_size = int(requests.head(remote_file_url).headers['Content-Length'])
+        # azure file size
+        azure_size = get_blob_metadata_from_azure(blob_name)['raw_file_downloaded_size']
+        if remote_size != azure_size:
+            return True
+        else:
+            return False
+
+
 def process_nighttime_data(date: datetime.datetime):
     """
     Download, reproject, convert to COG, and upload to Azure
@@ -194,7 +208,10 @@ def process_nighttime_data(date: datetime.datetime):
     year = date.strftime('%Y')
     month = int(date.strftime('%m'))
     try:
-        if not blob_exists_in_azure(f'{ROOT_FOLDER}/cogs/{year}/{month}/SVDNB_npp_d{date}.rade9d_sunfiltered_cog.tif'):
+        # if not blob_exists_in_azure(f'{ROOT_FOLDER}/cogs/{year}/{month}/SVDNB_npp_d{date}.rade9d_sunfiltered_cog.tif'):
+        if check_download_need(f'cogs/{year}/{month}/SVDNB_npp_d{date.strftime("%Y%m%d")}.rade9d_sunfiltered_cog.tif',
+                               f'{ROOT_URL}SVDNB_npp_d{date.strftime("%Y%m%d")}.rade9d_sunfiltered.tif'):
+            # fetch metadata from Azure
             logger.info(f"Retrieving raw data for {date.strftime('%Y-%m-%d')}")
             with tempfile.TemporaryDirectory() as temp_dir:
                 cog_path = f'{temp_dir}/cogs/{year}/{month}'
@@ -202,7 +219,7 @@ def process_nighttime_data(date: datetime.datetime):
                     os.makedirs(cog_path)
                 download_nighttime_data(
                     f'{ROOT_URL}SVDNB_npp_d{date.strftime("%Y%m%d")}.rade9d_sunfiltered.tif',
-                    f'{temp_dir}/SVDNB_npp_d{date}.rade9d_sunfiltered.tif')
+                    f'{temp_dir}/SVDNB_npp_d{date.strftime("%Y%m%d")}.rade9d_sunfiltered.tif')
 
                 # TODO: Following line is only for Development purposes
                 # copy to local file to temp dir
@@ -214,10 +231,19 @@ def process_nighttime_data(date: datetime.datetime):
                                              output_path=f'{cog_path}/SVDNB_npp_d{date.strftime("%Y%m%d")}.rade9d_sunfiltered_cog.tif')
                 upload_to_azure(f'{cog_path}/SVDNB_npp_d{date.strftime("%Y%m%d")}.rade9d_sunfiltered_cog.tif',
                                 f'cogs/{year}/{month}/SVDNB_npp_d{date.strftime("%Y%m%d")}.rade9d_sunfiltered_cog.tif')
+                metadata_dict = {
+                    'raw_file_downloaded_at': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    'raw_file_downloaded_size': os.path.getsize(raw_file),
+                }
+                set_metadata_in_azure(
+                    f'cogs/{year}/{month}/SVDNB_npp_d{date.strftime("%Y%m%d")}.rade9d_sunfiltered_cog.tif',
+                    metadata_dict)
                 # create_vrt from here
                 create_vrt(f'{cog_path}/SVDNB_npp_d{date.strftime("%Y%m%d")}.rade9d_sunfiltered_cog.tif', date.year,
                            date.month)
-                upload_to_azure(f'{cog_path}/SVDNB_npp_rade9d_sunfiltered.vrt', f'cogs/{year}/{month}/SVDNB_npp_rade9d_sunfiltered.vrt')
+                upload_to_azure(f'{cog_path}/SVDNB_npp_rade9d_sunfiltered.vrt',
+                                f'cogs/{year}/{month}/SVDNB_npp_rade9d_sunfiltered.vrt')
+
     except Exception as e:
         logger.error(f"Failed to process data for {date.strftime('%Y-%m-%d')}: {e}")
 

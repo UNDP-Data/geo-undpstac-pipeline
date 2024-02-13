@@ -34,5 +34,30 @@ def download_blob_from_azure(blob_name: str, local_path: str):
     except Exception as e:
         raise e
 
+
+def set_metadata_in_azure(blob_name: str, metadata: dict):
+    """
+    Set metadata in an Azure blob
+    :param blob_name: str
+    :param metadata: dict
+    :return: None
+    """
+    try:
+        connect_str = os.getenv('AZURE_STORAGE_CONNECTION_STRING')
+        blob_service_client = BlobServiceClient.from_connection_string(connect_str)
+        blob_client = blob_service_client.get_blob_client(container='geo-nightlights', blob=blob_name)
+        blob_client.set_blob_metadata(metadata)
+    except Exception as e:
+        raise e
+
+
+def get_blob_metadata_from_azure(blob_name: str):
+    try:
+        connect_str = os.getenv('AZURE_STORAGE_CONNECTION_STRING')
+        blob_service_client = BlobServiceClient.from_connection_string(connect_str)
+        blob_client = blob_service_client.get_blob_client(container='geo-nightlights', blob=blob_name)
+        return blob_client.get_blob_properties()
+    except Exception as e:
+        raise e
 # if __name__ == "__main__":
 #     print(blob_exists_in_azure('data/raw/SVDNB_npp_d20240201.rade9d_sunfiltered.tif'))
