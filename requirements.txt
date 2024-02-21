@@ -1,4 +1,5 @@
 aiohttp
+shapely
 azure-storage-blob
 GDAL
 python-dotenv
