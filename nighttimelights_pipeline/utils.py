@@ -40,7 +40,8 @@ def should_download(blob_name: str=None, remote_file_url: str=None) -> bool:
         # remote file size
         remote_size = fetch_resource_size(url=remote_file_url)
         # azure file size
-        azure_size = get_blob_metadata_from_azure(blob_name)['raw_file_downloaded_size']
+        #azure_size = get_blob_metadata_from_azure(blob_name)['raw_file_downloaded_size']
+        azure_size = 0
         if remote_size != azure_size:
             return True
         else:

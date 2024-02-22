@@ -3,7 +3,7 @@ import logging
 import argparse
 import os
 import asyncio
-from nighttimelights_pipeline.core import process_nighttime_data
+from nighttimelights_pipeline.acore import process_nighttime_data
 
 async def main():
     logging.basicConfig()
@@ -17,7 +17,7 @@ async def main():
             "%Y-%m-%d %H:%M:%S",
         )
     )
-    logger.setLevel(logging.DEBUG)
+    logger.setLevel(logging.INFO)
     logger.handlers.clear()
     logger.addHandler(logging_stream_handler)
     logger.name = 'nighttimelights'
@@ -40,8 +40,13 @@ async def main():
         await process_nighttime_data(datetime.datetime(date.year, date.month, date.day))
 
 def run_pipeline():
-    asyncio.run(main())
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.INFO)
+
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info('Pipeline was cancelled by the user')
 
 if __name__ == '__main__':
-
-    asyncio.run(main())
+    run_pipeline()

@@ -1,3 +1,4 @@
+import os
 from enum import Enum
 ROOT_EOG_URL = 'https://eogdata.mines.edu/nighttime_light/nightly/'
 
@@ -20,3 +21,6 @@ FILE_TYPE_NAMES = set(FILE_TYPE_FOLDERS)
 
 AZURE_CONTAINER_NAME = 'stacdata'
 AZURE_DNB_FOLDER = 'nighttime-lights'
+AZURE_STORAGE_CONNECTION_STRING = os.environ.get('AZURE_STORAGE_CONNECTION_STRING')
+COG_CONVERT_TIMEOUT= os.environ.get('COG_CONVERT_TIMEOUT', 1800)
+AIOHTTP_READ_CHUNKSIZE = os.environ.get('AIOHTTP_READ_CHUNKSIZE',1024**2*4) # 4MB
