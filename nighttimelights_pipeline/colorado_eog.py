@@ -33,8 +33,9 @@ async def download_file(file_url=None, no_attempts=3, connect_timeout=250, data_
     """
     try:
         parse_res = urllib.parse.urlparse(file_url)
-        _, file_name = os.path.split(parse_res.path)
-        file_name = f'{file_name}.local'
+        pth, __ = os.path.split(file_url)
+        _, orig_file_name = os.path.split(parse_res.path)
+        file_name = f'{orig_file_name}.local'
         dst_file_path = f'/tmp/{file_name}'
         if os.path.exists(dst_file_path):
             logger.debug(f'Returning local file {dst_file_path}')
@@ -43,7 +44,7 @@ async def download_file(file_url=None, no_attempts=3, connect_timeout=250, data_
 
         async with aiohttp.ClientSession(timeout=timeout) as session:
             for attempt in range(no_attempts):
-                logger.info(f'Attempt no {attempt} to download {file_url}')
+                logger.info(f'Attempt no {attempt+1} to download {orig_file_name} from {pth}')
                 try:
                     async with session.get(file_url, timeout=data_read_timeout) as response:
                         if response.status == 200:
@@ -79,12 +80,12 @@ async def download_file(file_url=None, no_attempts=3, connect_timeout=250, data_
                             raise Exception(msg)
                 except asyncio.CancelledError as ce:
                     logger.error(
-                        f'{ce.__class__.__name__} was encountered in attempt {attempt}')
+                        f'Download action for {file_url} was cancelled by the user')
                     if os.path.exists(dst_file_path):
                         os.remove(dst_file_path)
                     raise ce
                 except Exception as e:
-                    logger.error(f'Exception {e} in attempt {attempt}')
+                    logger.error(f'Exception "{e}" was encountered in while downloading {file_url}')
                     if os.path.exists(dst_file_path):
                         os.remove(dst_file_path)
                     if attempt == no_attempts - 1:
@@ -92,6 +93,7 @@ async def download_file(file_url=None, no_attempts=3, connect_timeout=250, data_
                     continue
 
     except Exception as fe:
+        print('jussi')
         if os.path.exists(dst_file_path):
             os.remove(dst_file_path)
         raise fe

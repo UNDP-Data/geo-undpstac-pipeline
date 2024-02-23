@@ -155,7 +155,7 @@ async def process_nighttime_data(date: datetime.datetime = None,
             logger.info(f'No nighttime lights data will be processed for {date} from Colorado EOG ')
 
     except asyncio.CancelledError as ce:
-        logger.info(f'Cancelling...')
+        logger.info(f'Cancelling all tasks and actions...')
         timeout_event.set()
 
     except Exception as e:
