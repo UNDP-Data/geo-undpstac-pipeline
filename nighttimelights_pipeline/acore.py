@@ -2,7 +2,7 @@ import multiprocessing
 import asyncio
 from nighttimelights_pipeline.utils import should_download
 from nighttimelights_pipeline.colorado_eog import compute_ntl_filename, download_file
-from nighttimelights_pipeline.const import DNB_FILE_TYPES, AZURE_DNB_FOLDER, COG_CONVERT_TIMEOUT,AIOHTTP_READ_CHUNKSIZE
+from nighttimelights_pipeline.const import DNB_FILE_TYPES, AZURE_DNB_COLLECTION_FOLDER, COG_CONVERT_TIMEOUT,AIOHTTP_READ_CHUNKSIZE
 import datetime
 import logging
 import os
@@ -51,7 +51,7 @@ def tiff2cog(src_path=None, dst_path=None, timeout_event=None, use_translate=Tru
                 "RESAMPLING=NEAREST",
             ],
 
-            #projWin=(0, 0, 25, -20),
+            projWin=(0, 0, 25, -20),
 
             callback=gdal_callback,
             callback_data=(timeout_event, progressbar)
@@ -75,7 +75,7 @@ def tiff2cog(src_path=None, dst_path=None, timeout_event=None, use_translate=Tru
 
 
                         )
-
+    #TODO ADD LandSea mask
     ctime = datetime.datetime.fromtimestamp(os.path.getctime(src_path)).strftime('%Y%m%d%H%M%S')
     cog_ds.SetMetadata({f"DNB_FILE_SIZE_{ctime}": f"{os.path.getsize(src_path)}" })
     #logger.info(f'Setting COG metadata {cog_ds.GetMetadata()} ')
@@ -102,11 +102,14 @@ async def process_nighttime_data(date: datetime.datetime = None,
 
     try:
         remote_dnb_file = compute_ntl_filename(date=date,file_type=file_type)
+        remote_dnbcloudmask_file = compute_ntl_filename(date=date, file_type=DNB_FILE_TYPES.CLOUD_COVER)
+
         _, dnb_file_name = os.path.split(remote_dnb_file)
-        cog_blob_path = os.path.join(AZURE_DNB_FOLDER,str(year),f'{month:02d}', dnb_file_name)
+        cog_blob_path = os.path.join(AZURE_DNB_COLLECTION_FOLDER,str(year),f'{month:02d}', dnb_file_name)
         will_download=should_download(blob_name=cog_blob_path,remote_file_url=remote_dnb_file)
         if will_download:
             logger.info(f'Processing nighttime lights from Colorado EOG for {date}')
+
             local_dnb_file = await download_file(file_url=remote_dnb_file, read_chunk_size=AIOHTTP_READ_CHUNKSIZE)
             logger.info(f'Downloaded {remote_dnb_file} to {local_dnb_file}')
             local_cog_file = os.path.splitext(local_dnb_file)[0]

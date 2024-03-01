@@ -1,7 +1,13 @@
+import os
+import math
+import uuid as _uu
 import requests
-from nighttimelights_pipeline.azblob import blob_exists_in_azure, get_blob_metadata_from_azure
+from nighttimelights_pipeline.azblob import blob_exists_in_azure
 from tqdm import tqdm
 import logging
+
+
+
 logger = logging.getLogger(__name__)
 def download_http_resurce(url: str=None, save_path: str=None, timeout=(25, 250)):
     """
@@ -46,3 +52,32 @@ def should_download(blob_name: str=None, remote_file_url: str=None) -> bool:
             return True
         else:
             return False
+
+
+def get_cog_metadata(blob_path=None):
+    conn_str = os.environ.get('AZURE_STORAGE_CONNECTION_STRING')
+    assert conn_str not in []
+    pass
+
+
+def generate_id(name=None, pad_length=None):
+    """
+    Generate and return a UUID.
+
+    If the name parameter is provided, set the namespace to the provided
+    name and generate a UUID.
+    """
+    __alphabet__ = list("23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz")
+    __alphabetlen__ = int(math.ceil(math.log(2 ** 128, len(__alphabet__))))
+    if pad_length is None:
+        pad_length = __alphabetlen__
+
+    # If no name is given, generate a random UUID.
+    if name is None:
+        uuid = _uu.uuid4()
+    elif "http" not in name.lower():
+        uuid = _uu.uuid5(_uu.NAMESPACE_DNS, name)
+    else:
+        uuid = _uu.uuid5(_uu.NAMESPACE_URL, name)
+
+    return str(uuid)
