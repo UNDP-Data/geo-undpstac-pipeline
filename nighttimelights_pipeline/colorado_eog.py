@@ -93,7 +93,6 @@ async def download_file(file_url=None, no_attempts=3, connect_timeout=250, data_
                     continue
 
     except Exception as fe:
-        print('jussi')
         if os.path.exists(dst_file_path):
             os.remove(dst_file_path)
         raise fe

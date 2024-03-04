@@ -109,21 +109,53 @@ async def process_nighttime_data(date: datetime.datetime = None,
         will_download=should_download(blob_name=cog_blob_path,remote_file_url=remote_dnb_file)
         if will_download:
             logger.info(f'Processing nighttime lights from Colorado EOG for {date}')
+            download_futures = list()
+            for remote_file in (remote_dnb_file, remote_dnbcloudmask_file):
+                download_task = asyncio.ensure_future(
+                    download_file(file_url=remote_file, read_chunk_size=AIOHTTP_READ_CHUNKSIZE)
+                )
+                download_task.set_name(remote_file)
+                download_futures.append(download_task)
+            downloaded, not_downloaded = await asyncio.wait(download_futures, timeout=1800,
+                                                    return_when=asyncio.FIRST_EXCEPTION)
 
-            local_dnb_file = await download_file(file_url=remote_dnb_file, read_chunk_size=AIOHTTP_READ_CHUNKSIZE)
-            logger.info(f'Downloaded {remote_dnb_file} to {local_dnb_file}')
-            local_cog_file = os.path.splitext(local_dnb_file)[0]
-            cog_task = asyncio.ensure_future(
-                asyncio.to_thread(tiff2cog, src_path=local_dnb_file, dst_path=local_cog_file, timeout_event=timeout_event )
-            )
-            cog_task.set_name('cog')
+            local_dnb_files = list()
+            for downloaded_future in downloaded:
+                try:
+                    downloaded_file = await downloaded_future
+                    task_name = downloaded_future.get_name()
+                    logger.info(f'Successfully downloaded {task_name}')
+                    local_dnb_files.append(downloaded_file)
+                except Exception as e:
+                    raise e
+            for pending_future in not_downloaded:
+                try:
+                    pending_future.cancel()
+                    await pending_future
+                except asyncio.exceptions.CancelledError as e:
+                    failed_dnb_file = pending_future.get_name()
+                    msg = f'Failed to download {failed_dnb_file}'
+                    raise Exception(msg)
+
+            local_cog_files = [os.path.splitext(e)[0] for e in local_dnb_files]
+            files_to_convert = dict(zip(local_dnb_files, local_cog_files))
+            cog_tasks = list()
+            converted_cogs = list()
+
+            for local_dnb_file, local_cog_file in files_to_convert.items():
+                cog_task = asyncio.ensure_future(
+                    asyncio.to_thread(tiff2cog, src_path=local_dnb_file, dst_path=local_cog_file, timeout_event=timeout_event )
+                )
+                cog_task.set_name(local_cog_file)
+                cog_tasks.append(cog_task)
+
             done, pending = await asyncio.wait(
-                [cog_task],
-                return_when=asyncio.FIRST_COMPLETED,
+                cog_tasks,
+                return_when=asyncio.FIRST_EXCEPTION,
                 timeout=CONVERT_TIMEOUT,
             )
             if len(done) == 0:
-                error_message = f'Failed to convert {local_dnb_file} to COG in {CONVERT_TIMEOUT} seconds.'
+                error_message = f'Failed to convert {files_to_convert} to COG in {CONVERT_TIMEOUT} seconds.'
                 logger.error(error_message)
                 timeout_event.set()
 
@@ -132,16 +164,16 @@ async def process_nighttime_data(date: datetime.datetime = None,
                     pending_future.cancel()
                     await pending_future
                 except asyncio.exceptions.CancelledError as e:
-                    future_name = pending_future.get_name()
-                    logger.error()
+                    raise
 
             for done_future in done:
                 try:
                     await done_future
-                    logger.info(f'Successfully created DNB COG {local_cog_file}')
+                    converted_cog = done_future.get_name()
+                    logger.info(f'Successfully created DNB COG {converted_cog}')
+                    converted_cogs.append(converted_cog)
 
                 except Exception as e:
-                    logger.error(f'done future error {e}')
                     raise
 
             #upload to azure
@@ -160,7 +192,6 @@ async def process_nighttime_data(date: datetime.datetime = None,
     except asyncio.CancelledError as ce:
         logger.info(f'Cancelling all tasks and actions...')
         timeout_event.set()
-
     except Exception as e:
         logger.error(f"Failed to process data for {date.strftime('%Y-%m-%d')}: {e}")
 
