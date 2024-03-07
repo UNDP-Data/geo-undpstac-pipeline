@@ -4,6 +4,7 @@ import uuid as _uu
 import requests
 from nighttimelights_pipeline.azblob import blob_exists_in_azure
 from tqdm import tqdm
+import datetime
 import logging
 
 
@@ -81,3 +82,9 @@ def generate_id(name=None, pad_length=None):
         uuid = _uu.uuid5(_uu.NAMESPACE_URL, name)
 
     return str(uuid)
+
+
+def extract_date_from_dnbfile(dnb_file_name=None):
+    item_acquisition_date_str = dnb_file_name.split('_')[2].split('.')[0][1:]
+    item_date = datetime.datetime.strptime(item_acquisition_date_str, '%Y%m%d')
+    return item_date

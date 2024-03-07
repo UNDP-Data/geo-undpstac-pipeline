@@ -125,21 +125,21 @@ def upload(
         raise e
 
 
-def upload_to_azure(local_path: str, blob_name: str):
+def upload_to_azure(local_path: str, blob_path: str):
     """
     Upload a file to Azure Blob Storage
     :param local_path: str - As we are using a temporary directory, the file will be deleted after the function is done
-    :param blob_name:
+    :param blob_path:
     :return:
     """
     try:
         blob_service_client = get_blob_service_client()
-        blob_client = blob_service_client.get_blob_client(blob=blob_name)
+        blob_client = blob_service_client.get_blob_client(blob=blob_path)
         with open(local_path, "rb") as file:
             total_size = os.path.getsize(local_path)
-            with tqdm(total=total_size, unit="B", unit_scale=True, unit_divisor=1024, desc=blob_name) as pbar:
+            with tqdm(total=total_size, unit="B", unit_scale=True, unit_divisor=1024, desc=blob_path) as pbar:
                 # Upload the file in chunks
-                logger.info(f"Uploading {local_path} to {blob_name}")
+                logger.info(f"Uploading {local_path} to {blob_path}")
                 chunk_size = 4 * 1024 * 1024  # 4MB chunks
                 while True:
                     data = file.read(chunk_size)
@@ -148,5 +148,5 @@ def upload_to_azure(local_path: str, blob_name: str):
                     blob_client.upload_blob(data, overwrite=True, max_concurrency=8)
                     pbar.update(len(data))
     except Exception as e:
-        logger.error(f"Failed to upload {local_path} to {blob_name}: {e}")
+        logger.error(f"Failed to upload {local_path} to {blob_path}: {e}")
         raise e

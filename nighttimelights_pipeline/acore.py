@@ -8,8 +8,9 @@ import logging
 import os
 import tqdm
 from osgeo import gdal
-from nighttimelights_pipeline.azblob import upload, set_metadata_in_azure, upload_to_azure
-
+from nighttimelights_pipeline.azblob import upload_to_azure
+from nighttimelights_pipeline.stac import update_undp_stac
+gdal.UseExceptions()
 
 logger = logging.getLogger(__name__)
 
@@ -51,27 +52,36 @@ def tiff2cog(src_path=None, dst_path=None, timeout_event=None, use_translate=Tru
                 "RESAMPLING=NEAREST",
             ],
 
-            projWin=(0, 0, 25, -20),
-
+            projWin=(0, 0, 5, -5),
             callback=gdal_callback,
             callback_data=(timeout_event, progressbar)
         )
     else:
-        cog_ds = gdal.Warp(srcDSOrSrcDSTab=src_path, destNameOrDestDS=dst_path,
-                        format='COG',
-                        creationOptions=[
-                            "BLOCKSIZE=256",
-                            "OVERVIEWS=IGNORE_EXISTING",
-                            "COMPRESS=ZSTD",
-                            "PREDICTOR = YES",
-                            "OVERVIEW_RESAMPLING=NEAREST",
-                            "BIGTIFF=YES",
-                            "TARGET_SRS=EPSG:3857",
-                            "RESAMPLING=NEAREST",
-                        ],
-                        #options=gdal.WarpOptions(warpOptions=['NUM_THREADS=ALL_CPUS']), #if this is enabled async mode does not work with CTRL^C
-                        callback=gdal_callback,
-                        ccallback_data=(timeout_event, progressbar)
+
+
+        cog_ds = gdal.Warp(
+                            srcDSOrSrcDSTab=src_path,
+                            destNameOrDestDS=dst_path,
+                            format='COG',
+                            creationOptions=[
+                                "BLOCKSIZE=256",
+                                "OVERVIEWS=IGNORE_EXISTING",
+                                "COMPRESS=ZSTD",
+                                "PREDICTOR = YES",
+                                "OVERVIEW_RESAMPLING=NEAREST",
+                                "BIGTIFF=YES",
+                                "TARGET_SRS=EPSG:3857",
+                                "RESAMPLING=NEAREST",
+                            ],
+                            outputBounds=[0., -5.0, 5.0, 0.0],
+                            outputBoundsSRS='EPSG:4326',
+                            #targetAlignedPixels=True, #there are issues with this param. it requres res and probbaly wants precise bounds computation on input
+                            # yRes=-450.,
+                            # xRes=450.,
+                            #options=gdal.WarpOptions(warpOptions=['NUM_THREADS=ALL_CPUS']), #if this is enabled async mode does not work with CTRL^C
+                            #options=gdal.WarpOptions(targetAlignedPixels=True,), #if this is enabled async mode does not work with CTRL^C
+                            callback=gdal_callback,
+                            callback_data=(timeout_event, progressbar)
 
 
                         )
@@ -96,8 +106,10 @@ async def process_nighttime_data(date: datetime.datetime = None,
     """
 
 
-    year = date.year
-    month = date.month
+    year = date.strftime('%Y')
+    month = date.strftime('%m')
+    day = date.strftime('%d')
+    print(year, month, day)
     timeout_event = multiprocessing.Event()
 
     try:
@@ -105,7 +117,9 @@ async def process_nighttime_data(date: datetime.datetime = None,
         remote_dnbcloudmask_file = compute_ntl_filename(date=date, file_type=DNB_FILE_TYPES.CLOUD_COVER)
 
         _, dnb_file_name = os.path.split(remote_dnb_file)
-        cog_blob_path = os.path.join(AZURE_DNB_COLLECTION_FOLDER,str(year),f'{month:02d}', dnb_file_name)
+        _, dnb_cloudmask_file_name = os.path.split(remote_dnbcloudmask_file)
+        cog_blob_path = os.path.join(AZURE_DNB_COLLECTION_FOLDER,year,month, day, dnb_file_name)
+        cog_cloudmask_blob_path = os.path.join(AZURE_DNB_COLLECTION_FOLDER,year,month, day, dnb_cloudmask_file_name)
         will_download=should_download(blob_name=cog_blob_path,remote_file_url=remote_dnb_file)
         if will_download:
             logger.info(f'Processing nighttime lights from Colorado EOG for {date}')
@@ -139,12 +153,17 @@ async def process_nighttime_data(date: datetime.datetime = None,
 
             local_cog_files = [os.path.splitext(e)[0] for e in local_dnb_files]
             files_to_convert = dict(zip(local_dnb_files, local_cog_files))
+
             cog_tasks = list()
             converted_cogs = list()
 
             for local_dnb_file, local_cog_file in files_to_convert.items():
                 cog_task = asyncio.ensure_future(
-                    asyncio.to_thread(tiff2cog, src_path=local_dnb_file, dst_path=local_cog_file, timeout_event=timeout_event )
+                    asyncio.to_thread(tiff2cog,
+                                      src_path=local_dnb_file,
+                                      dst_path=local_cog_file,
+                                      timeout_event=timeout_event,
+                                      use_translate=False )
                 )
                 cog_task.set_name(local_cog_file)
                 cog_tasks.append(cog_task)
@@ -154,6 +173,7 @@ async def process_nighttime_data(date: datetime.datetime = None,
                 return_when=asyncio.FIRST_EXCEPTION,
                 timeout=CONVERT_TIMEOUT,
             )
+
             if len(done) == 0:
                 error_message = f'Failed to convert {files_to_convert} to COG in {CONVERT_TIMEOUT} seconds.'
                 logger.error(error_message)
@@ -181,7 +201,18 @@ async def process_nighttime_data(date: datetime.datetime = None,
             start = datetime.datetime.now()
 
             #upload(dst_path=cog_blob_path,src_path=local_cog_file, content_type='image/tiff', overwrite=True)
-            upload_to_azure(local_path=local_cog_file, blob_name=cog_blob_path)
+            #upload_to_azure(local_path=local_cog_file, blob_name=cog_blob_path)
+
+            for ccog in converted_cogs:
+                _, cog_file_name = os.path.split(ccog)
+                cog_blob_pth = os.path.join(AZURE_DNB_COLLECTION_FOLDER, year, month, day,
+                                                       cog_file_name)
+                upload_to_azure(local_path=ccog, blob_path=cog_blob_pth)
+
+            #update_stac
+
+            update_undp_stac(daily_dnb_blob_path=cog_blob_path, daily_dnb_cloudmask_blob_path=cog_cloudmask_blob_path)
+
             end = datetime.datetime.now()
             logger.info(end-start)
 
@@ -190,11 +221,13 @@ async def process_nighttime_data(date: datetime.datetime = None,
             logger.info(f'No nighttime lights data will be processed for {date} from Colorado EOG ')
 
     except asyncio.CancelledError as ce:
+
         logger.info(f'Cancelling all tasks and actions...')
         timeout_event.set()
     except Exception as e:
-        logger.error(f"Failed to process data for {date.strftime('%Y-%m-%d')}: {e}")
 
+        logger.error(f"Failed to process data for {date.strftime('%Y-%m-%d')}: {e}")
+        raise
 
 def process_historical_nighttime_data(start_date: datetime.datetime, end_date: datetime.datetime):
     """
