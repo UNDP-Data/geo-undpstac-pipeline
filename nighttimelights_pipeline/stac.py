@@ -1,25 +1,75 @@
 import datetime
 import json
+from typing import Any
+from urllib.parse import urlparse
 import pystac
 from pystac.extensions.eo import Band, EOExtension
 from pystac.provider import Provider, ProviderRole
+from pystac import stac_io, HREF
 from osgeo import gdal, osr
 from shapely.geometry import Polygon, mapping
 from tempfile import TemporaryDirectory
 import os
 from nighttimelights_pipeline import const
-from nighttimelights_pipeline.azblob import blob_exists_in_azure, get_blob_service_client, upload
+from nighttimelights_pipeline.azblob import blob_exists_in_azure, get_container_client, upload, download
 from nighttimelights_pipeline import utils as u
-
+from pystac.layout import TemplateLayoutStrategy
 import logging
 
 tmp_dir = TemporaryDirectory()
 logger = logging.getLogger(__name__)
 
-def create_stac_catalog(id='undp-stac', description='Geospatial data in COG format from UNDP GeoHub data store', title=None):
 
-    return pystac.Catalog(id=id, description=description, title=title)
 
+class AzureStacIO(stac_io.StacIO):
+    # container_client = get_blob_service_client()
+    container_name = f'{const.AZURE_CONTAINER_NAME}/'
+    content_type = 'application/json'
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+        self.container_client = get_container_client()
+    def get_relative_blob_path(self, url=None):
+        purl = urlparse(url)
+        return purl.path[1:].split(self.container_name)[1]
+
+    def read_text(self, source: HREF, *args: Any, **kwargs: Any) -> str:
+        src_blob_path = self.get_relative_blob_path(url=source)
+        return download(blob_path=src_blob_path)
+
+
+    def write_text(self, dest: HREF, txt: str, *args: Any, **kwargs: Any ) -> None:
+
+        dst_blob_path = self.get_relative_blob_path(url=dest)
+        upload(
+            dst_path=dst_blob_path,
+            data=txt.encode('utf-8'),
+            content_type=self.content_type
+        )
+    def __del__(self):
+        self.container_client.close()
+
+
+
+
+
+
+def create_stac_catalog(
+        id=None,
+        description=None,
+        title=None,
+        root_href=None
+    ):
+
+
+    catalog = pystac.Catalog(
+        id=id,
+        description=description,
+        title=title,
+        href=os.path.join(root_href, const.STAC_CATALOG_NAME) ,
+        catalog_type=pystac.CatalogType.RELATIVE_PUBLISHED
+    )
+    #catalog.normalize_hrefs(strategy=TemplateLayoutStrategy(catalog_template='${catalog}'), root_href=root_href)
+    return catalog
 
 def get_bbox_and_footprint(raster_path=None):
     ds = gdal.OpenEx(raster_path, gdal.OF_RASTER )
@@ -69,7 +119,7 @@ def create_stac_item(item_path=None):
 def create_dnb_stac_item(daily_dnb_blob_path=None, daily_dnb_cloudmask_blob_path=None, add_eo_extension=True):
 
 
-    container_client = get_blob_service_client()
+    container_client = get_container_client()
 
     dnb_blob_client = container_client.get_blob_client(blob=daily_dnb_blob_path)
     dnb_cloudmask_blob_client = container_client.get_blob_client(blob=daily_dnb_cloudmask_blob_path)
@@ -81,16 +131,20 @@ def create_dnb_stac_item(daily_dnb_blob_path=None, daily_dnb_cloudmask_blob_path
 
     item = pystac.Item(#id=u.generate_id(name=item_path),
                         id=f'nighttime-lights-{item_date.strftime("%Y-%m-%d")}',
+                        #id=f'SVDNB_npp_d{item_date.strftime("%Y%m%d")}',
                         geometry=footprint,
                         bbox=bbox,
                         datetime=item_date,
                         properties={},
-                        stac_extensions=['EOExtension'] if add_eo_extension else None
+                        stac_extensions=['eo', 'proj'] if add_eo_extension else ['proj']
                        )
+    item.ext.add('proj')
+    item.ext.proj.epsg = 3857
     dnb_asset = pystac.Asset(
             href=dnb_blob_client.url,
             media_type=pystac.MediaType.COG,
             title='VIIRS DNB mosaic from Colorado schools of Mines',
+            roles=[('analytics')]
 
         )
     if add_eo_extension:
@@ -117,10 +171,12 @@ def create_dnb_stac_item(daily_dnb_blob_path=None, daily_dnb_cloudmask_blob_path
 
 
 def create_nighttime_lights_collection():
+
+
     spatial_extent = pystac.SpatialExtent(bboxes=[const.DNB_BBOX])
     collection_interval = [const.DNB_START_DATE, const.DNB_START_DATE]
     temporal_extent = pystac.TemporalExtent(intervals=collection_interval)
-    col = pystac.Collection(id='nighttime-lights',description='', title='Nighthly nighttime lights mosaics',
+    col = pystac.Collection(id='nighttime-lights',description='a good description', title='Nighthly nighttime lights mosaics',
                             license='Creative Commons Attribution 4.0 International',
                             providers=[
                                 Provider(name='Colorado Schools of Mines',roles=[ProviderRole.PRODUCER, ProviderRole.LICENSOR]),
@@ -128,10 +184,35 @@ def create_nighttime_lights_collection():
 
                             ],
                             extent=pystac.Extent(spatial=spatial_extent, temporal=temporal_extent),
+                            catalog_type=pystac.CatalogType.RELATIVE_PUBLISHED
                             )
+    return col
 
 
+def create_undp_stac(container_name=const.AZURE_CONTAINER_NAME,
+                     collection_folder=const.AZURE_DNB_COLLECTION_FOLDER):
+    az_stacio = AzureStacIO()
 
+    root_catalog_blob_path = const.STAC_CATALOG_NAME
+    print(blob_exists_in_azure(blob_path=root_catalog_blob_path, container_client=az_stacio.container_client))
+    root_catalog_url = f'{az_stacio.container_client.url}/catalog.json'
+    c = pystac.Catalog.from_file(root_catalog_url, stac_io=az_stacio )
+    c.describe()
+
+    logger.info('...creating ROOT STAC catalog')
+    root_catalog = create_stac_catalog(
+        id='undp-stac',
+        description='Geospatial data in COG format from UNDP GeoHub data store',
+        title='VIIRS DNB/nighttime lights daily mosaics',
+        root_href=container_client.url
+    )
+
+    logger.info('...creating nighttime lights STAC collection')
+    nighttime_collection = create_nighttime_lights_collection()
+    # add collection to root catalog
+    root_catalog.add_child(nighttime_collection )
+    # save to azure through
+    root_catalog.save(stac_io=az_stacio)
 
 def update_undp_stac(
         daily_dnb_blob_path=None,
@@ -146,22 +227,38 @@ def update_undp_stac(
     :param collection_folder:
     :return:
     """
-    root_catalog_blob_path = os.path.join(container_name, 'catalog.json')
+    az_stacio = AzureStacIO()
+    container_client = get_container_client()
+    root_catalog_blob_path = container_client.url
+
+
     root_catalog_exists =blob_exists_in_azure(root_catalog_blob_path)
-    dnb_collection_blob_path = os.path.join(collection_folder, 'collection.json')
+    dnb_collection_blob_path = os.path.join(root_catalog_blob_path, collection_folder, 'collection.json')
     dnb_collection_exists = blob_exists_in_azure(dnb_collection_blob_path)
+
+
     if not root_catalog_exists :
         logger.info('...creating ROOT STAC catalog')
-        root_catalog = create_stac_catalog()
+        root_catalog = create_stac_catalog(
+            id='undp-stac',
+            description='Geospatial data in COG format from UNDP GeoHub data store',
+            title='VIIRS DNB/nighttime lights daily mosaics',
+            root_href=container_client.url
+        )
     else:
-        root_catalog = pystac.Catalog.from_file(root_catalog_blob_path)
-
+        root_catalog = pystac.Catalog.from_file(root_catalog_blob_path,stac_io=az_stacio)
+    print(json.dumps(root_catalog.to_dict(), indent=4))
     if not dnb_collection_exists:
         logger.info('...creating STAC collection')
         nighttime_collection = create_nighttime_lights_collection()
-    else:
-        nighttime_collection = pystac.Collection.from_file(dnb_collection_blob_path)
+        root_catalog.add_child(nighttime_collection,)
+        root_catalog.save(stac_io=az_stacio)
 
+    else:
+        nighttime_collection = pystac.Collection.from_file(dnb_collection_blob_path,)
+
+    print(json.dumps(nighttime_collection.to_dict(), indent=4))
+    exit()
     pth, blob_name = os.path.split(daily_dnb_blob_path)
     item_date = u.extract_date_from_dnbfile(blob_name)
     year = item_date.strftime('%Y')
@@ -197,7 +294,11 @@ def update_undp_stac(
     year_month_catalog.add_item(daily_dnb_item)
     p = os.path.join(collection_folder, year, month,)
     print(p)
-    year_month_catalog.normalize_and_save(root_href='./out/', catalog_type=pystac.CatalogType.SELF_CONTAINED )
+    template = TemplateLayoutStrategy(item_template=const.STAC_ITEM_TEMPLATE)
+    year_month_catalog.normalize_and_save(root_href='./out/',
+                                          strategy= template,
+                                          catalog_type=pystac.CatalogType.SELF_CONTAINED
+                                          )
     print(json.dumps(year_month_catalog.to_dict(), indent=4))
     print(json.dumps(daily_dnb_item.to_dict(), indent=4))
 
@@ -205,7 +306,7 @@ def update_undp_stac(
 if __name__ == '__main__':
     logging.basicConfig()
     logger.setLevel(logging.INFO)
-    catalog = create_stac_catalog(title="UNDP STAC data store")
+    #catalog = create_stac_catalog(title="UNDP STAC data store")
     # print(json.dumps( catalog.to_dict(), indent=4))
     path = '/work/tmp/ntl/SVDNB_npp_d20240125.rade9d_3857.tif'
     from nighttimelights_pipeline.utils import generate_id
@@ -213,9 +314,10 @@ if __name__ == '__main__':
     item = create_stac_item(item_path=path)
     d = item.to_dict()
     #d = catalog.to_dict()
-    print(json.dumps(d, indent=4))
+    #print(json.dumps(d, indent=4))
     #catalog.normalize_hrefs(os.path.join(tmp_dir.name, "stac"))
     blob_path = os.path.join(const.AZURE_DNB_COLLECTION_FOLDER,'2024/01/SVDNB_npp_d20240125.rade9d.tif')
     clmask_blob_path = os.path.join(const.AZURE_DNB_COLLECTION_FOLDER,'2024/01/SVDNB_npp_d20240125.vcld.tif')
     print(blob_path)
-    update_undp_stac(daily_dnb_blob_path=blob_path, daily_dnb_cloudmask_blob_path=clmask_blob_path)
+    #update_undp_stac(daily_dnb_blob_path=blob_path, daily_dnb_cloudmask_blob_path=clmask_blob_path)
+    create_undp_stac()

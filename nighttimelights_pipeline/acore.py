@@ -8,7 +8,7 @@ import logging
 import os
 import tqdm
 from osgeo import gdal
-from nighttimelights_pipeline.azblob import upload_to_azure
+from nighttimelights_pipeline.azblob import upload
 from nighttimelights_pipeline.stac import update_undp_stac
 gdal.UseExceptions()
 
@@ -23,7 +23,7 @@ def gdal_callback(complete, message, data):
         return 0
 
 
-def tiff2cog(src_path=None, dst_path=None, timeout_event=None, use_translate=True):
+def tiff2cog(src_path=None, dst_path=None, timeout_event=None, use_translate=True, description=None):
     """
     Concvert a GeoTIFF to COG
 
@@ -88,6 +88,7 @@ def tiff2cog(src_path=None, dst_path=None, timeout_event=None, use_translate=Tru
     #TODO ADD LandSea mask
     ctime = datetime.datetime.fromtimestamp(os.path.getctime(src_path)).strftime('%Y%m%d%H%M%S')
     cog_ds.SetMetadata({f"DNB_FILE_SIZE_{ctime}": f"{os.path.getsize(src_path)}" })
+    cog_ds.SetMetadata({'DESCRIPTION':description})
     #logger.info(f'Setting COG metadata {cog_ds.GetMetadata()} ')
     del cog_ds
 
@@ -163,7 +164,9 @@ async def process_nighttime_data(date: datetime.datetime = None,
                                       src_path=local_dnb_file,
                                       dst_path=local_cog_file,
                                       timeout_event=timeout_event,
-                                      use_translate=False )
+                                      use_translate=False,
+                                      description=f'DNB mosaic for {date.date()}'
+                                      )
                 )
                 cog_task.set_name(local_cog_file)
                 cog_tasks.append(cog_task)
@@ -207,7 +210,7 @@ async def process_nighttime_data(date: datetime.datetime = None,
                 _, cog_file_name = os.path.split(ccog)
                 cog_blob_pth = os.path.join(AZURE_DNB_COLLECTION_FOLDER, year, month, day,
                                                        cog_file_name)
-                upload_to_azure(local_path=ccog, blob_path=cog_blob_pth)
+                upload(src_path=ccog, dst_path=cog_blob_pth)
 
             #update_stac
 

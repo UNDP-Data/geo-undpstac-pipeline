@@ -1,5 +1,5 @@
 import os
-from azure.storage.blob import BlobServiceClient, ContentSettings
+from azure.storage.blob import BlobServiceClient, ContentSettings, ContainerClient
 from nighttimelights_pipeline.const import AZURE_CONTAINER_NAME, AZURE_STORAGE_CONNECTION_STRING
 import logging
 import math
@@ -8,60 +8,27 @@ logger = logging.getLogger(__name__)
 
 
 
-def get_blob_service_client(conn_str=AZURE_STORAGE_CONNECTION_STRING, container_name=AZURE_CONTAINER_NAME):
+def get_container_client(conn_str=AZURE_STORAGE_CONNECTION_STRING, container_name=AZURE_CONTAINER_NAME):
     return BlobServiceClient.from_connection_string(conn_str).get_container_client(container_name)
 
 
-def blob_exists_in_azure(blob_name:str=None):
+def blob_exists_in_azure(blob_path:str=None, container_client=None):
     """
     Check if a blob exists in Azure
     :param blob_name: str
     :return: bool
     """
-
-    blob_service_client=get_blob_service_client()
-    blob_client = blob_service_client.get_blob_client(blob_name)
-    return blob_client.exists()
-
-
-def download_blob_from_azure(blob_name: str, local_path: str):
-    """
-    Download a blob from Azure
-    :param blob_name: str
-    :param local_path: str
-    :return: None
-    """
     try:
-        blob_service_client = get_blob_service_client()
-        blob_client = blob_service_client.get_blob_client(blob=blob_name)
-        with open(local_path, "wb") as file:
-            file.write(blob_client.download_blob().readall())
-    except Exception as e:
-        raise e
+        local_container_client = container_client if container_client else get_container_client()
+        blob_client = local_container_client.get_blob_client(blob_path)
+        return blob_client.exists()
+    finally:
+        if not container_client:
+            local_container_client.close()
 
 
-def set_metadata_in_azure(blob_name: str, metadata: dict):
-    """
-    Set metadata in an Azure blob
-    :param blob_name: str
-    :param metadata: dict
-    :return: None
-    """
-    try:
-        blob_service_client = get_blob_service_client()
-        blob_client = blob_service_client.get_blob_client(blob=blob_name)
-        blob_client.set_blob_metadata(metadata)
-    except Exception as e:
-        raise e
 
 
-def get_blob_metadata_from_azure(blob_name: str):
-    try:
-        blob_service_client = get_blob_service_client()
-        blob_client = blob_service_client.get_blob_client( blob=blob_name)
-        return blob_client.get_blob_properties()
-    except Exception as e:
-        raise e
 
 
 
@@ -72,7 +39,8 @@ def upload(
                 data: bytes = None,
                 content_type: str = None,
                 overwrite: bool = True,
-                max_concurrency: int = 1
+                max_concurrency: int = 1,
+                container_client:ContainerClient = None
                 ):
 
     try:
@@ -93,9 +61,9 @@ def upload(
                 progress = current / total * 100
                 rounded_progress = int(math.floor(progress))
                 logger.info(f'{blob_name} was uploaded - {rounded_progress}%')
+        local_container_client = container_client if container_client else get_container_client()
 
-        blob_service_client = get_blob_service_client()
-        blob_client = blob_service_client.get_blob_client(blob=dst_path)
+        blob_client = local_container_client.get_blob_client(blob=dst_path)
         if src_path:
             size = os.path.getsize(src_path)
             #with tqdm.wrapattr(open(src_path, 'rb'), "read", total=size) as dataf:
@@ -123,30 +91,38 @@ def upload(
             raise ValueError("Either 'src_path' or 'data' must be provided.")
     except Exception as e:
         raise e
+    finally:
+        if not container_client:
+            local_container_client.close()
 
-
-def upload_to_azure(local_path: str, blob_path: str):
+def download(blob_path: str = None, dst_path: str = None, container_client: ContainerClient =None) -> str:
     """
-    Upload a file to Azure Blob Storage
-    :param local_path: str - As we are using a temporary directory, the file will be deleted after the function is done
-    :param blob_path:
-    :return:
+    Downloads a file from Azure Blob Storage and returns its data or saves it to a local file.
+
+    Args:
+        blob_path (str, optional): The name of the blob to download. Defaults to None.
+        dst_path (str, optional): The local path to save the downloaded file. If not provided, the file data is returned instead of being saved to a file. Defaults to None.
+
+    Returns:
+        bytes or None: The data of the downloaded file, or None if a dst_path argument is provided.
     """
     try:
-        blob_service_client = get_blob_service_client()
-        blob_client = blob_service_client.get_blob_client(blob=blob_path)
-        with open(local_path, "rb") as file:
-            total_size = os.path.getsize(local_path)
-            with tqdm(total=total_size, unit="B", unit_scale=True, unit_divisor=1024, desc=blob_path) as pbar:
-                # Upload the file in chunks
-                logger.info(f"Uploading {local_path} to {blob_path}")
-                chunk_size = 4 * 1024 * 1024  # 4MB chunks
-                while True:
-                    data = file.read(chunk_size)
-                    if not data:
-                        break
-                    blob_client.upload_blob(data, overwrite=True, max_concurrency=8)
-                    pbar.update(len(data))
-    except Exception as e:
-        logger.error(f"Failed to upload {local_path} to {blob_path}: {e}")
-        raise e
+        logger.debug(f'Downloading {blob_path}')
+        local_container_client = container_client if container_client else get_container_client()
+
+        blob_client = local_container_client.get_blob_client(blob=blob_path)
+        chunk_list = []
+        stream = blob_client.download_blob()
+        for chunk in stream.chunks():
+            chunk_list.append(chunk)
+
+        data = b"".join(chunk_list)
+        logger.debug(f'Finished downloading {blob_path}')
+        if dst_path:
+            with open(dst_path, "wb") as f:
+                f.write(data)
+            return None
+        else:
+            return data.decode('utf-8')
+    finally:
+        if not container_client:local_container_client.close()

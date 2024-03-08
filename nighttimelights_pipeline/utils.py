@@ -6,7 +6,7 @@ from nighttimelights_pipeline.azblob import blob_exists_in_azure
 from tqdm import tqdm
 import datetime
 import logging
-
+from pystac import Item
 
 
 logger = logging.getLogger(__name__)
@@ -88,3 +88,5 @@ def extract_date_from_dnbfile(dnb_file_name=None):
     item_acquisition_date_str = dnb_file_name.split('_')[2].split('.')[0][1:]
     item_date = datetime.datetime.strptime(item_acquisition_date_str, '%Y%m%d')
     return item_date
+
+

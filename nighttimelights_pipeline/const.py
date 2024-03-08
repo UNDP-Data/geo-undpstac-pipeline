@@ -2,6 +2,7 @@ import datetime
 import os
 from enum import Enum
 from pystac.extensions.eo import Band
+
 ROOT_EOG_URL = 'https://eogdata.mines.edu/nighttime_light/nightly/'
 
 class DNB_FILE_TYPES(Enum):
@@ -29,6 +30,9 @@ AIOHTTP_READ_CHUNKSIZE = os.environ.get('AIOHTTP_READ_CHUNKSIZE',1024**2*4) # 4M
 
 STAC_CATALOG_NAME = 'catalog.json'
 STAC_COLLECTION_NAME = 'collection.json'
+STAC_ITEM_TEMPLATE = '${day}/SVDNB_npp_d${year}${month}${day}.json'
+STAC_MONTHLY_CATALOG_TEMPLATE = '${month}/catalog.json'
+STAC_YEARLY_COLLECTION_TEMPLATE = '${year}/catalog.json'
 
 
 DNB_BANDS = dict( DNB=Band.create(name='DNB', description='COG mosaic representing nighttime lights from VIIRS intrument. Mosaic cretaed by Colorado School of Mines', common_name='nighttime lights', center_wavelength=0.7),
@@ -38,3 +42,5 @@ DNB_BANDS = dict( DNB=Band.create(name='DNB', description='COG mosaic representi
 DNB_BBOX = -180, -65, 180, 75
 
 DNB_START_DATE = datetime.datetime(year=2022, month=1, day=1)
+
+
