@@ -1,11 +1,12 @@
 services:
-  app:
+  pipeline:
     build:
       context: .
       dockerfile: Dockerfile
-    command: python cli.py
+    command: python -m nighttimelights_pipeline.cli -y 2024 -m 1 -d 25
     volumes:
       - .:/app
+      - /tmp:/tmp
     environment:
       - AZURE_STORAGE_CONNECTION_STRING=${AZURE_STORAGE_CONNECTION_STRING}
       - AZURE_STORAGE_CONTAINER_NAME=${AZURE_STORAGE_CONTAINER_NAME}

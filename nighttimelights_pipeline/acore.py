@@ -8,8 +8,11 @@ import logging
 import os
 import tqdm
 from osgeo import gdal
+from nighttimelights_pipeline.validate import validate
 from nighttimelights_pipeline.azblob import upload
 from nighttimelights_pipeline.stac import update_undp_stac
+
+
 gdal.UseExceptions()
 
 logger = logging.getLogger(__name__)
@@ -23,9 +26,10 @@ def gdal_callback(complete, message, data):
         return 0
 
 
-def tiff2cog(src_path=None, dst_path=None, timeout_event=None, use_translate=True, description=None):
+def tiff2cog(src_path=None, dst_path=None, timeout_event=None, use_translate=True, description=None,
+             lonmin=-180, latmin=-65, lonmax=180, latmax=75):
     """
-    Concvert a GeoTIFF to COG
+    Convert a GeoTIFF to COG
 
     :param src_path: str, input GeoTIDF path
     :param dst_path: str, output COG path
@@ -35,63 +39,102 @@ def tiff2cog(src_path=None, dst_path=None, timeout_event=None, use_translate=Tru
     """
 
     logger.info(f'Converting {src_path} to COG')
-    progressbar = tqdm.tqdm(range(0,100), desc=f'Creating COG {dst_path}', unit_scale=True)
+    if os.path.exists(dst_path):os.remove(dst_path)
+    logger.info(f'Setting custom metadata ')
+    ctime = datetime.datetime.fromtimestamp(os.path.getctime(src_path)).strftime('%Y%m%d%H%M%S')
+    src_cog_ds = gdal.OpenEx(src_path, gdal.OF_UPDATE, )
+    band = src_cog_ds.GetRasterBand(1)
+    # COGS do not like to be edited. So adding metadata will BREAK them
+    src_cog_ds.SetMetadata({f'DNB_FILE_SIZE_{ctime}': f'{os.path.getsize(src_path)}'})
+    band.SetMetadata({'DESCRIPTION': description})
+    del src_cog_ds
     if use_translate:
+        logger.info(f'running gdal_translate on {src_path}')
+        progressbar = tqdm.tqdm(range(0, 100), desc=f'Creating COG {dst_path}', unit_scale=True)
+        gdal.TranslateOptions()
         cog_ds = gdal.Translate(
             destName=dst_path,
             srcDS=src_path,
             format='COG',
             creationOptions=[
+
                 "BLOCKSIZE=256",
                 "OVERVIEWS=IGNORE_EXISTING",
                 "COMPRESS=ZSTD",
-                "PREDICTOR = YES",
+                "LEVEL=9",
+                "PREDICTOR=YES",
                 "OVERVIEW_RESAMPLING=NEAREST",
-                "BIGTIFF=YES",
+                "BIGTIFF=IF_SAFER",
                 "TARGET_SRS=EPSG:3857",
+                # "RES=500",
+                # f"EXTENT={lonmin},{latmin},{lonmax},{latmax}"
                 "RESAMPLING=NEAREST",
-            ],
+                #"STATISTICS=YES",
+                "ADD_ALPHA=NO",
+                "COPY_SRC_MDD=YES"
 
-            projWin=(0, 0, 5, -5),
+            ],
+            stats=True,
+            # xRes=500,
+            # yRes=500,
+            projWin=(lonmin, latmax, lonmax, latmin),
+            projWinSRS='EPSG:4326',
             callback=gdal_callback,
             callback_data=(timeout_event, progressbar)
         )
     else:
 
 
+
+        logger.info(f'running gdalwarp on {src_path}')
+        progressbar = tqdm.tqdm(range(0, 100), desc=f'Creating COG {dst_path}', unit_scale=True)
+
+        wo = gdal.WarpOptions(
+            format='COG',
+            srcSRS='EPSG:4326',
+            dstSRS='EPSG:3857',
+            overviewLevel=None,
+            multithread=True,
+            outputBounds=[lonmin, latmin, lonmax, latmax],  # <xmin> <ymin> <xmax> <ymax>
+            outputBoundsSRS='EPSG:4326',
+            resampleAlg='NEAREST',
+            targetAlignedPixels=True,
+            xRes=500,
+            yRes=500,
+            creationOptions=[
+                "BLOCKSIZE=256",
+                "OVERVIEWS=IGNORE_EXISTING",
+                "COMPRESS=ZSTD",
+                "LEVEL=9",
+                "PREDICTOR=YES",
+                "OVERVIEW_RESAMPLING=NEAREST",
+                "BIGTIFF=IF_SAFER",
+                "NUM_THREADS=ALL_CPUS",
+                "ADD_ALPHA=NO",
+
+
+            ],
+            copyMetadata=True,
+            callback=gdal_callback,
+            callback_data=(timeout_event, progressbar)
+        )
         cog_ds = gdal.Warp(
-                            srcDSOrSrcDSTab=src_path,
-                            destNameOrDestDS=dst_path,
-                            format='COG',
-                            creationOptions=[
-                                "BLOCKSIZE=256",
-                                "OVERVIEWS=IGNORE_EXISTING",
-                                "COMPRESS=ZSTD",
-                                "PREDICTOR = YES",
-                                "OVERVIEW_RESAMPLING=NEAREST",
-                                "BIGTIFF=YES",
-                                "TARGET_SRS=EPSG:3857",
-                                "RESAMPLING=NEAREST",
-                            ],
-                            outputBounds=[0., -5.0, 5.0, 0.0],
-                            outputBoundsSRS='EPSG:4326',
-                            #targetAlignedPixels=True, #there are issues with this param. it requres res and probbaly wants precise bounds computation on input
-                            # yRes=-450.,
-                            # xRes=450.,
-                            #options=gdal.WarpOptions(warpOptions=['NUM_THREADS=ALL_CPUS']), #if this is enabled async mode does not work with CTRL^C
-                            #options=gdal.WarpOptions(targetAlignedPixels=True,), #if this is enabled async mode does not work with CTRL^C
-                            callback=gdal_callback,
-                            callback_data=(timeout_event, progressbar)
+            srcDSOrSrcDSTab=src_path,
+            destNameOrDestDS=dst_path,
+            options=wo,
+        )
 
-
-                        )
     #TODO ADD LandSea mask
-    ctime = datetime.datetime.fromtimestamp(os.path.getctime(src_path)).strftime('%Y%m%d%H%M%S')
-    cog_ds.SetMetadata({f"DNB_FILE_SIZE_{ctime}": f"{os.path.getsize(src_path)}" })
-    cog_ds.SetMetadata({'DESCRIPTION':description})
-    #logger.info(f'Setting COG metadata {cog_ds.GetMetadata()} ')
-    del cog_ds
 
+    del cog_ds
+    warnings, errors, details = validate(dst_path, full_check=True)
+    if warnings:
+        for wm in warnings:
+            logger.warning(wm)
+    if errors:
+        for em in errors:
+            logger.error(em)
+        raise Exception('\n'.join(errors))
 
 
 
@@ -125,7 +168,8 @@ async def process_nighttime_data(date: datetime.datetime = None,
         if will_download:
             logger.info(f'Processing nighttime lights from Colorado EOG for {date}')
             download_futures = list()
-            for remote_file in (remote_dnb_file, remote_dnbcloudmask_file):
+            #for remote_file in (remote_dnb_file, remote_dnbcloudmask_file):
+            for remote_file in (remote_dnbcloudmask_file,):
                 download_task = asyncio.ensure_future(
                     download_file(file_url=remote_file, read_chunk_size=AIOHTTP_READ_CHUNKSIZE)
                 )
@@ -160,12 +204,15 @@ async def process_nighttime_data(date: datetime.datetime = None,
 
             for local_dnb_file, local_cog_file in files_to_convert.items():
                 cog_task = asyncio.ensure_future(
+
+
                     asyncio.to_thread(tiff2cog,
                                       src_path=local_dnb_file,
                                       dst_path=local_cog_file,
                                       timeout_event=timeout_event,
                                       use_translate=False,
-                                      description=f'DNB mosaic for {date.date()}'
+                                      description=f'DNB mosaic for {date.date()}',
+                                      #lonmin=0, lonmax=5, latmin=-5, latmax=0
                                       )
                 )
                 cog_task.set_name(local_cog_file)
@@ -210,11 +257,11 @@ async def process_nighttime_data(date: datetime.datetime = None,
                 _, cog_file_name = os.path.split(ccog)
                 cog_blob_pth = os.path.join(AZURE_DNB_COLLECTION_FOLDER, year, month, day,
                                                        cog_file_name)
-                upload(src_path=ccog, dst_path=cog_blob_pth)
+                #upload(src_path=ccog, dst_path=cog_blob_pth)
 
             #update_stac
 
-            update_undp_stac(daily_dnb_blob_path=cog_blob_path, daily_dnb_cloudmask_blob_path=cog_cloudmask_blob_path)
+            #update_undp_stac(daily_dnb_blob_path=cog_blob_path, daily_dnb_cloudmask_blob_path=cog_cloudmask_blob_path)
 
             end = datetime.datetime.now()
             logger.info(end-start)

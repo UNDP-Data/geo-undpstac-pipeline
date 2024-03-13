@@ -66,7 +66,7 @@ def create_stac_catalog(
         description=description,
         title=title,
         href=os.path.join(root_href, const.STAC_CATALOG_NAME) ,
-        catalog_type=pystac.CatalogType.RELATIVE_PUBLISHED
+        catalog_type=pystac.CatalogType.RELATIVE_PUBLISHED,
     )
     #catalog.normalize_hrefs(strategy=TemplateLayoutStrategy(catalog_template='${catalog}'), root_href=root_href)
     return catalog
@@ -189,22 +189,21 @@ def create_nighttime_lights_collection():
     return col
 
 
-def create_undp_stac(container_name=const.AZURE_CONTAINER_NAME,
-                     collection_folder=const.AZURE_DNB_COLLECTION_FOLDER):
-    az_stacio = AzureStacIO()
+def create_undp_stac_tree(az_stacio:AzureStacIO=None):
+    """
+    Create UNDP stac tree, that is the root catalog and the nighttime lights collection
+    :param az_stacio:
+    :return:
+    """
 
-    root_catalog_blob_path = const.STAC_CATALOG_NAME
-    print(blob_exists_in_azure(blob_path=root_catalog_blob_path, container_client=az_stacio.container_client))
-    root_catalog_url = f'{az_stacio.container_client.url}/catalog.json'
-    c = pystac.Catalog.from_file(root_catalog_url, stac_io=az_stacio )
-    c.describe()
+
 
     logger.info('...creating ROOT STAC catalog')
     root_catalog = create_stac_catalog(
         id='undp-stac',
         description='Geospatial data in COG format from UNDP GeoHub data store',
         title='VIIRS DNB/nighttime lights daily mosaics',
-        root_href=container_client.url
+        root_href=az_stacio.container_client.url
     )
 
     logger.info('...creating nighttime lights STAC collection')
@@ -213,6 +212,9 @@ def create_undp_stac(container_name=const.AZURE_CONTAINER_NAME,
     root_catalog.add_child(nighttime_collection )
     # save to azure through
     root_catalog.save(stac_io=az_stacio)
+    return root_catalog
+
+
 
 def update_undp_stac(
         daily_dnb_blob_path=None,
@@ -228,56 +230,84 @@ def update_undp_stac(
     :return:
     """
     az_stacio = AzureStacIO()
-    container_client = get_container_client()
-    root_catalog_blob_path = container_client.url
 
-
-    root_catalog_exists =blob_exists_in_azure(root_catalog_blob_path)
-    dnb_collection_blob_path = os.path.join(root_catalog_blob_path, collection_folder, 'collection.json')
-    dnb_collection_exists = blob_exists_in_azure(dnb_collection_blob_path)
-
+    root_catalog_blob_path = const.STAC_CATALOG_NAME
+    root_catalog_url = os.path.join(az_stacio.container_client.url, root_catalog_blob_path)
+    root_catalog_exists = blob_exists_in_azure(blob_path=root_catalog_blob_path, container_client=az_stacio.container_client)
 
     if not root_catalog_exists :
-        logger.info('...creating ROOT STAC catalog')
-        root_catalog = create_stac_catalog(
-            id='undp-stac',
-            description='Geospatial data in COG format from UNDP GeoHub data store',
-            title='VIIRS DNB/nighttime lights daily mosaics',
-            root_href=container_client.url
-        )
+        root_catalog = create_undp_stac_tree(az_stacio=az_stacio)
     else:
-        root_catalog = pystac.Catalog.from_file(root_catalog_blob_path,stac_io=az_stacio)
-    print(json.dumps(root_catalog.to_dict(), indent=4))
-    if not dnb_collection_exists:
-        logger.info('...creating STAC collection')
-        nighttime_collection = create_nighttime_lights_collection()
-        root_catalog.add_child(nighttime_collection,)
-        root_catalog.save(stac_io=az_stacio)
+        logger.info('...reading ROOT STAC catalog from ')
+        root_catalog = pystac.Catalog.from_file(root_catalog_url,stac_io=az_stacio)
 
-    else:
-        nighttime_collection = pystac.Collection.from_file(dnb_collection_blob_path,)
+    collection_ids = [e.id for e in root_catalog.get_collections()]
+    assert collection_folder in collection_ids, f'{collection_folder} collection does not exist. Something enexpected happened!'
 
-    print(json.dumps(nighttime_collection.to_dict(), indent=4))
-    exit()
+    nighttime_collection = root_catalog.get_child(collection_folder)
+
+
+
+    print(daily_dnb_blob_path, daily_dnb_cloudmask_blob_path)
+
+
+
     pth, blob_name = os.path.split(daily_dnb_blob_path)
     item_date = u.extract_date_from_dnbfile(blob_name)
     year = item_date.strftime('%Y')
     month = item_date.strftime('%m')
     day = item_date.strftime('%d')
+    time_el = []
+    time_path_catalog = None
+    root_catalog.describe()
+    for time_unit in year, month:
+        time_el.append(time_unit)
+        time_path = os.path.sep.join(time_el)
+        #time_id = '-'.join(time_el)
+        time_path_catalog_root_url = os.path.join(az_stacio.container_client.url, time_path)
+        #time_path_id = f'{collection_folder}-{time_id}'
+        time_path_catalog = nighttime_collection.get_child(time_unit, recursive=True)
+        catalog_exists = time_path_catalog is None
+        print(time_unit, catalog_exists)
+        if not catalog_exists:
+            time_path_catalog = create_stac_catalog(
+                id=time_unit,
+                title=f'Nighttime lights in {time_path}',
+                root_href=time_path_catalog_root_url
+            )
+            nelem = len(time_el)
+            if nelem == 1:
+                nighttime_collection.add_child(time_path_catalog)
+            else:
+                parent_id = time_el[nelem-2]
+                parent = nighttime_collection.get_child(parent_id, recursive=True)
+                parent.add_child(time_path_catalog)
 
-    dnb_year_catalog_blob_path = os.path.join(collection_folder, year, 'catalog.json')
-    if not blob_exists_in_azure(dnb_year_catalog_blob_path):
-        year_catalog = create_stac_catalog(id=f'nighttime-lights-{year}',title=f'Nighttime lights in {year}')
-    else:
-        year_catalog = pystac.Catalog.from_file(dnb_year_catalog_blob_path)
 
-    dnb_year_month_catalog_blob_path = os.path.join(collection_folder, year, month, 'catalog.json')
-    if not blob_exists_in_azure(dnb_year_month_catalog_blob_path):
-        year_month_catalog = create_stac_catalog(id=f'nighttime-lights-{year}-{month}', title=f'Nighttime lights in {year}-{month}')
-    else:
-        year_month_catalog = pystac.Catalog.from_file(dnb_year_month_catalog_blob_path)
+        # else:
+        #     time_path_catalog_url = os.path.join(time_path_catalog_root_url, const.STAC_CATALOG_NAME)
+        #     print(time_path_catalog_url)
+        #     time_path_catalog = pystac.Catalog.from_file(href=time_path_catalog_url,stac_io=az_stacio)
 
-    # dnb_item_path = daily_dnb_blob_path.replace('.tif', '.json')
+    root_catalog.describe()
+    root_catalog.save(stac_io=az_stacio)
+
+    # dnb_year_catalog_blob_path = os.path.join(collection_folder, year, const.STAC_CATALOG_NAME)
+    # if not blob_exists_in_azure(dnb_year_catalog_blob_path):
+    #     year_catalog = create_stac_catalog(
+    #         id=f'nighttime-lights-{year}',
+    #         title=f'Nighttime lights in {year}'
+    #     )
+    # else:
+    #     year_catalog = pystac.Catalog.from_file(dnb_year_catalog_blob_path)
+    #
+    # dnb_year_month_catalog_blob_path = os.path.join(collection_folder, year, month, 'catalog.json')
+    # if not blob_exists_in_azure(dnb_year_month_catalog_blob_path):
+    #     year_month_catalog = create_stac_catalog(id=f'nighttime-lights-{year}-{month}', title=f'Nighttime lights in {year}-{month}')
+    # else:
+    #     year_month_catalog = pystac.Catalog.from_file(dnb_year_month_catalog_blob_path)
+
+    dnb_item_path = daily_dnb_blob_path.replace('.tif', '.json')
     dnb_item_path = daily_dnb_cloudmask_blob_path.replace('.vcld.tif', '.json')
     daily_dnb_item = create_dnb_stac_item(
         daily_dnb_blob_path=daily_dnb_blob_path,
@@ -291,16 +321,7 @@ def update_undp_stac(
     #        data=json.dumps(daily_dnb_item.to_dict(), indent=4).encode('utf-8'),
     #        content_type='application/json')
     #2 upload monthly catalog
-    year_month_catalog.add_item(daily_dnb_item)
-    p = os.path.join(collection_folder, year, month,)
-    print(p)
-    template = TemplateLayoutStrategy(item_template=const.STAC_ITEM_TEMPLATE)
-    year_month_catalog.normalize_and_save(root_href='./out/',
-                                          strategy= template,
-                                          catalog_type=pystac.CatalogType.SELF_CONTAINED
-                                          )
-    print(json.dumps(year_month_catalog.to_dict(), indent=4))
-    print(json.dumps(daily_dnb_item.to_dict(), indent=4))
+
 
 
 if __name__ == '__main__':

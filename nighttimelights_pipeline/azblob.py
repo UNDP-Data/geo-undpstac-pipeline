@@ -44,30 +44,31 @@ def upload(
                 ):
 
     try:
-        logger.info(f'Uploading {src_path} to {dst_path}')
+
         _, blob_name = os.path.split(dst_path)
+        #
+        # def _progress_(current, total) -> None:
+        #     logger.info(f'Current {current} vs total {total}')
+        #     progress = current / total * 100
+        #     rounded_progress = int(math.floor(progress))
+        #     logger.info(f'{blob_name} was uploaded - {rounded_progress}%')
+        #
+        # def callback(response):
+        #     current = response.context['upload_stream_current']  # There's also a 'download_stream_current'
+        #     total = response.context['data_stream_total']
+        #     logger.info(f'Current {current} vs total {total}')
+        #     if current is not None:
+        #         progress = current / total * 100
+        #         rounded_progress = int(math.floor(progress))
+        #         logger.info(f'{blob_name} was uploaded - {rounded_progress}%')
 
-        def _progress_(current, total) -> None:
-            logger.info(f'Current {current} vs total {total}')
-            progress = current / total * 100
-            rounded_progress = int(math.floor(progress))
-            logger.info(f'{blob_name} was uploaded - {rounded_progress}%')
-
-        def callback(response):
-            current = response.context['upload_stream_current']  # There's also a 'download_stream_current'
-            total = response.context['data_stream_total']
-            logger.info(f'Current {current} vs total {total}')
-            if current is not None:
-                progress = current / total * 100
-                rounded_progress = int(math.floor(progress))
-                logger.info(f'{blob_name} was uploaded - {rounded_progress}%')
         local_container_client = container_client if container_client else get_container_client()
 
         blob_client = local_container_client.get_blob_client(blob=dst_path)
         if src_path:
             size = os.path.getsize(src_path)
-            #with tqdm.wrapattr(open(src_path, 'rb'), "read", total=size) as dataf:
-            with open(src_path, 'rb') as dataf:
+            with tqdm.wrapattr(open(src_path, 'rb'), "read", total=size, desc=f'Uploading {blob_name}') as dataf:
+            #with open(src_path, 'rb') as dataf:
                 logger.debug(f'Uploading {src_path} to {dst_path}')
                 blob_client.upload_blob(
                     data=dataf,
@@ -75,7 +76,7 @@ def upload(
                     content_settings=ContentSettings(content_type=content_type) if content_type else None,
                     #progress_hook=_progress_,
                     max_concurrency=max_concurrency,
-                    raw_response_hook=callback
+                    #raw_response_hook=callback
                 )
         elif data:
             logger.debug(f'Uploading bytes/data to {dst_path}')
@@ -83,7 +84,7 @@ def upload(
                 data=data,
                 overwrite=overwrite,
                 content_settings=ContentSettings(content_type=content_type),
-                progress_hook=_progress_,
+                #progress_hook=_progress_,
                 max_concurrency=max_concurrency
 
             )
