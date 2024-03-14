@@ -9,6 +9,10 @@ class DNB_FILE_TYPES(Enum):
     DNB = 'DNB'
     DNB_SUNFILTERED = 'DNB_SUNFILTERED'
     CLOUD_COVER = 'CLOUD_COVER'
+class DNB_FILE_TYPES_DESC(Enum):
+    DNB = 'VIIRS DNB mosaic'
+    DNB_SUNFILTERED = 'VIIRS DNB sunfiltered mosaic'
+    CLOUD_COVER = 'VIRRS DNB cloud cover'
 
 DNB_FOLDER = 'rade9d'
 DNB_SUNFILTERED_FOLDER = 'rade9d_sunfiltered'

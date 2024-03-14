@@ -32,12 +32,13 @@ async def main():
 
     # if no date is provided, use yesterday's date
     if not any([args.year, args.month, args.day]): # None of the arguments is provided
-        await process_nighttime_data(datetime.datetime.now().date() - datetime.timedelta(days=1))
+        yesterday = datetime.datetime.now().date() - datetime.timedelta(days=1)
+        await process_nighttime_data(yesterday)
     elif not all([args.year, args.month, args.day]):
         raise ValueError('If you provide a date, you must provide the year, month, and day')
     else:
         date = datetime.date(args.year, args.month, args.day)
-        await process_nighttime_data(datetime.datetime(date.year, date.month, date.day))
+        await process_nighttime_data(datetime.datetime(date.year, date.month, date.day).date())
 
 def run_pipeline():
     logger = logging.getLogger(__name__)
