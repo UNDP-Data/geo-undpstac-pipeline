@@ -265,7 +265,10 @@ async def process_nighttime_data(date: datetime.date = None,
 
             ################### update stac ########################
 
-            update_undp_stac(daily_dnb_blob_path=cog_dnb_blob_path, daily_dnb_cloudmask_blob_path=daily_dnb_cloudmask_blob_path)
+            update_undp_stac(daily_dnb_blob_path=cog_dnb_blob_path,
+                             daily_dnb_cloudmask_blob_path=daily_dnb_cloudmask_blob_path,
+                             file_type=file_type.value
+                             )
 
 
 

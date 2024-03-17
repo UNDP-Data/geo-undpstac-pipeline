@@ -21,12 +21,14 @@ def blob_exists_in_azure(blob_path:str=None, container_client=None):
     try:
         local_container_client = container_client if container_client else get_container_client()
         blob_client = local_container_client.get_blob_client(blob_path)
-        return blob_client.exists()
+        exists = blob_client.exists()
+        if exists:
+            return True, blob_client.url
+        else:
+            return False, None
     finally:
         if not container_client:
             local_container_client.close()
-
-
 
 
 

@@ -6,7 +6,9 @@ from nighttimelights_pipeline.azblob import blob_exists_in_azure
 from tqdm import tqdm
 import datetime
 import logging
-from pystac import Item
+from osgeo import gdal
+import json
+from datetime import timezone
 
 
 logger = logging.getLogger(__name__)
@@ -41,15 +43,20 @@ def fetch_resource_size(url=None):
 
 
 def should_download(blob_name: str=None, remote_file_url: str=None) -> bool:
-    if not blob_exists_in_azure(blob_name):
+    blob_exists, url = blob_exists_in_azure(blob_name)
+    if not blob_exists:
         return True
     else:
         # remote file size
         remote_size = fetch_resource_size(url=remote_file_url)
-        # azure file size
-        #azure_size = get_blob_metadata_from_azure(blob_name)['raw_file_downloaded_size']
-        azure_size = 0
-        if remote_size != azure_size:
+        info = gdal.Info(url, format='json')
+        metadata = info['metadata']['']
+        for k, v in metadata.items():
+            if k.startswith('DNB_FILE_SIZE'):
+                prior_size = int(v)
+                break
+
+        if remote_size != prior_size:
             return True
         else:
             return False
@@ -86,7 +93,7 @@ def generate_id(name=None, pad_length=None):
 
 def extract_date_from_dnbfile(dnb_file_name=None):
     item_acquisition_date_str = dnb_file_name.split('_')[2].split('.')[0][1:]
-    item_date = datetime.datetime.strptime(item_acquisition_date_str, '%Y%m%d')
+    item_date = datetime.datetime.strptime(item_acquisition_date_str, '%Y%m%d').astimezone(timezone.utc)
     return item_date
 
 
