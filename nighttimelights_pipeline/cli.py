@@ -3,6 +3,7 @@ import logging
 import argparse
 import os
 import asyncio
+import sys
 from nighttimelights_pipeline.acore import process_nighttime_data
 
 async def main():
@@ -23,22 +24,46 @@ async def main():
     logger.name = 'nighttimelights'
     conn_str = os.environ.get('AZURE_STORAGE_CONNECTION_STRING')
     assert conn_str not in ['', None], f'invalid AZURE_STORAGE_CONNECTION_STRING={conn_str}'
-    parser = argparse.ArgumentParser(description='Process nighttime lights data from the Earth Observation Group at Colorado School of Mines.')
-    parser.add_argument('-year', '-y', type=int, help='The year of the data to download', required=False)
-    parser.add_argument('-month', '-m', type=int, help='The month of the data to download', required=False)
-    parser.add_argument('-day', '-d', type=int, help='The day of the data to download', required=False)
-    #args = parser.parse_args(args=None if sys.argv[1:] else ['--help'])
-    args = parser.parse_args()
+    parser = argparse.ArgumentParser(description='Process nighttime lights data from the Earth Observation Group Colorado School of Mines.')
+    subparsers = parser.add_subparsers(help='main modes of operation', dest='mode', required=True)
+    daily_parser = subparsers.add_parser(name='daily',
+                                         help='Run the pipeline in operational/daily mode',
+                                        description='Run the pipeline for a specified or previous day',
+                                         usage='\npython -m nighttimelights_pipeline.cli -y 2024 -m 1 -d 25\n' \
+                                         'python -m nighttimelights_pipeline.cli ')
 
-    # if no date is provided, use yesterday's date
-    if not any([args.year, args.month, args.day]): # None of the arguments is provided
-        yesterday = datetime.datetime.now().date() - datetime.timedelta(days=1)
-        await process_nighttime_data(yesterday)
-    elif not all([args.year, args.month, args.day]):
-        raise ValueError('If you provide a date, you must provide the year, month, and day')
-    else:
-        date = datetime.date(args.year, args.month, args.day)
-        await process_nighttime_data(datetime.datetime(date.year, date.month, date.day).date())
+    daily_parser.add_argument( '-y', '--year', type=int, help='The year of the data to download', required=False)
+    daily_parser.add_argument('-m', '--month', type=int, help='The month of the data to download', required=False)
+    daily_parser.add_argument('-d', '--day' , type=int, help='The day of the data to download', required=False)
+    archive_parser = subparsers.add_parser(name='archive', help='Run the pipeline in archive mode',
+                                         description='Run the pipeline for every day in a given time interval defined by two dates',
+                                        usage='python -m nighttimelights_pipeline.cli archive -s=2023-01-01 -e=2023-03-31')
+    archive_parser.add_argument('-s', '--start-date', type=lambda d: datetime.datetime.strptime(d, '%Y-%m-%d').date(), required=True,
+                                help='The start date from where the pipeline will start processing the VIIRS DNB mosaics')
+    archive_parser.add_argument('-e', '--end-date', type=lambda d: datetime.datetime.strptime(d, '%Y-%m-%d').date(), required=True,
+                                help='The end date signalizing the last day for which the VIIRS DNB mosaics will be processed')
+
+    args = parser.parse_args(args=None if sys.argv[1:] else ['--help'])
+    #args = parser.parse_args()
+    if args.mode == 'daily':
+        # if no date is provided, use yesterday's date
+        if not any([args.year, args.month, args.day]): # None of the arguments is provided
+            yesterday = datetime.datetime.now().date() - datetime.timedelta(days=1)
+            await process_nighttime_data(yesterday)
+        elif not all([args.year, args.month, args.day]):
+            raise ValueError('If you provide a date, you must provide the year, month, and day')
+        else:
+            date = datetime.date(args.year, args.month, args.day)
+            await process_nighttime_data(datetime.datetime(date.year, date.month, date.day).date())
+    if args.mode == 'archive':
+        start_date = args.start_date
+        end_date = args.end_date
+
+        delta = end_date - start_date  # returns timedelta
+
+        for i in range(delta.days + 1):
+            day = start_date + datetime.timedelta(days=i)
+            print(day)
 
 def run_pipeline():
     logger = logging.getLogger(__name__)
