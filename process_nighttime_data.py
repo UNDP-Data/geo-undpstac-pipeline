@@ -204,7 +204,7 @@ def process_nighttime_data(date: datetime.datetime):
     """
     # if not date:  # if date is not provided, use today's date
     #     date = datetime.datetime.now().strftime('%Y%m%d')
-    ROOT_FOLDER = 'data'
+
     year = date.strftime('%Y')
     month = int(date.strftime('%m'))
     try:
@@ -217,9 +217,8 @@ def process_nighttime_data(date: datetime.datetime):
                 cog_path = f'{temp_dir}/cogs/{year}/{month}'
                 if not os.path.exists(cog_path):
                     os.makedirs(cog_path)
-                download_nighttime_data(
-                    f'{ROOT_URL}SVDNB_npp_d{date.strftime("%Y%m%d")}.rade9d_sunfiltered.tif',
-                    f'{temp_dir}/SVDNB_npp_d{date.strftime("%Y%m%d")}.rade9d_sunfiltered.tif')
+                download_nighttime_data(url=f'{ROOT_URL}SVDNB_npp_d{date.strftime("%Y%m%d")}.rade9d_sunfiltered.tif',
+                    save_path=f'{temp_dir}/SVDNB_npp_d{date.strftime("%Y%m%d")}.rade9d_sunfiltered.tif')
 
                 # TODO: Following line is only for Development purposes
                 # copy to local file to temp dir
