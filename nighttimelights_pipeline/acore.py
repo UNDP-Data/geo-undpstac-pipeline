@@ -2,7 +2,7 @@ import multiprocessing
 import asyncio
 from nighttimelights_pipeline.utils import should_download
 from nighttimelights_pipeline.colorado_eog import get_dnb_files, download_file
-from nighttimelights_pipeline.const import DNB_FILE_TYPES, AZURE_DNB_COLLECTION_FOLDER, COG_CONVERT_TIMEOUT,AIOHTTP_READ_CHUNKSIZE
+from nighttimelights_pipeline.const import DNB_FILE_TYPES, AZURE_DNB_COLLECTION_FOLDER, COG_CONVERT_TIMEOUT,AIOHTTP_READ_CHUNKSIZE, COG_DOWNLOAD_TIMEOUT
 import datetime
 import logging
 import os
@@ -139,8 +139,10 @@ def tiff2cog(src_path=None, dst_path=None, timeout_event=None, use_translate=Tru
 
 async def process_nighttime_data(date: datetime.date = None,
                                  file_type=DNB_FILE_TYPES.DNB,
-                                 DOWNLOAD_TIMEOUT=1800,
-                                 CONVERT_TIMEOUT=COG_CONVERT_TIMEOUT):
+                                 DOWNLOAD_TIMEOUT=COG_DOWNLOAD_TIMEOUT,
+                                 CONVERT_TIMEOUT=COG_CONVERT_TIMEOUT,
+                                 force_processing=False
+                                 ):
     """
 
     :param date: the date for which the mosaics are produced
@@ -174,8 +176,10 @@ async def process_nighttime_data(date: datetime.date = None,
         cog_dnb_blob_path = azure_dnb_cogs[file_type.value]
         daily_dnb_cloudmask_blob_path = None
         remote_dnb_file = remote_dnb_files[file_type.value][0]
-
-        will_download=should_download(blob_name=cog_dnb_blob_path,remote_file_url=remote_dnb_file)
+        if force_processing:
+            will_download = force_processing
+        else:
+            will_download=should_download(blob_name=cog_dnb_blob_path,remote_file_url=remote_dnb_file)
         if will_download:
             logger.info(f'Processing nighttime lights from Colorado EOG for {date}')
             ################### downlaod from remote  ########################
@@ -220,7 +224,7 @@ async def process_nighttime_data(date: datetime.date = None,
                                       timeout_event=timeout_event,
                                       use_translate=False,
                                       description=dnb_file_desc,
-                                      lonmin=0, lonmax=5, latmin=-5, latmax=0
+                                      #lonmin=0, lonmax=5, latmin=-5, latmax=0
                                       )
                 )
                 cog_task.set_name(dnb_file_type)

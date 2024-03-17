@@ -334,7 +334,7 @@ def update_undp_stac(
         nighttime_collection.extent.temporal = temporal_extent
     else:
         update_temporal_extent(item_datetime=item_datetime, temporal_extent=temporal_extent)
-
+    logger.info('Saving STAC structure to Azure')
     root_catalog.save(stac_io=az_stacio)
 
 
