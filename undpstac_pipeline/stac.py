@@ -10,9 +10,9 @@ from osgeo import gdal, osr
 from shapely.geometry import Polygon, mapping
 from tempfile import TemporaryDirectory
 import os
-from nighttimelights_pipeline import const
-from nighttimelights_pipeline.azblob import blob_exists_in_azure, get_container_client, upload, download
-from nighttimelights_pipeline import utils as u
+from undpstac_pipeline import const
+from undpstac_pipeline.azblob import blob_exists_in_azure, get_container_client, upload, download
+from undpstac_pipeline import utils as u
 from pystac.layout import  CustomLayoutStrategy
 import logging
 

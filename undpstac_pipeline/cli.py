@@ -4,7 +4,7 @@ import argparse
 import os
 import asyncio
 import sys
-from nighttimelights_pipeline.acore import process_nighttime_data
+from undpstac_pipeline.acore import process_nighttime_data
 
 async def main():
     logging.basicConfig()
@@ -35,6 +35,12 @@ async def main():
     daily_parser.add_argument( '-y', '--year', type=int, help='The year of the data to download', required=False)
     daily_parser.add_argument('-m', '--month', type=int, help='The month of the data to download', required=False)
     daily_parser.add_argument('-d', '--day' , type=int, help='The day of the data to download', required=False)
+    #lonmin=-180, latmin=-65, lonmax=180, latmax=75
+    daily_parser.add_argument( '--lonmin' , type=float, help='The western bound', required=False, default=-180)
+    daily_parser.add_argument( '--latmin' , type=float, help='The southern bound', required=False, default=-65)
+    daily_parser.add_argument( '--lonmax' , type=float, help='The eastern bound', required=False, default=180)
+    daily_parser.add_argument( '--latmax' , type=float, help='The northern bound', required=False, default=75)
+
     daily_parser.add_argument('-f', '--force' , type=bool, action=argparse.BooleanOptionalAction, help='Ignore exiting COG and process again', required=False)
     daily_parser.add_argument('-l', '--log-level', help='Set log level ', type=str, choices=['INFO', 'DEBUG', 'TRACE'],
                         default='INFO')
@@ -47,6 +53,12 @@ async def main():
                                 help='The start date from where the pipeline will start processing the VIIRS DNB mosaics')
     archive_parser.add_argument('-e', '--end-date', type=lambda d: datetime.datetime.strptime(d, '%Y-%m-%d').date(), required=True,
                                 help='The end date signalizing the last day for which the VIIRS DNB mosaics will be processed')
+    archive_parser.add_argument('--lonmin', type=float, help='The western bound', required=False, default=-180)
+    archive_parser.add_argument('--latmin', type=float, help='The southern bound', required=False, default=-65)
+    archive_parser.add_argument('--lonmax', type=float, help='The eastern bound', required=False, default=180)
+    archive_parser.add_argument('--latmax', type=float, help='The northern bound', required=False, default=75)
+
+
     archive_parser.add_argument('-f', '--force', type=bool, action=argparse.BooleanOptionalAction,
                               help='Ignore exiting COG and process again', required=False)
     archive_parser.add_argument('-l', '--log-level', help='Set log level ', type=str, choices=['INFO', 'DEBUG', 'TRACE'],
@@ -65,14 +77,19 @@ async def main():
             raise ValueError('If you provide a date, you must provide the year, month, and day')
         else:
             date = datetime.date(args.year, args.month, args.day)
-            await process_nighttime_data(datetime.datetime(date.year, date.month, date.day).date(), force_processing=args.force)
+            await process_nighttime_data(
+                date=datetime.datetime(date.year, date.month, date.day).date(),
+                lonmin=args.lonmin, latmin=args.latmin, lonmax=args.lonmax, latmax=args.latmax,
+                force_processing=args.force)
     if args.mode == 'archive':
         start_date = args.start_date
         end_date = args.end_date
         delta = end_date - start_date  # returns timedelta
         for i in range(delta.days + 1):
             day = start_date + datetime.timedelta(days=i)
-            await process_nighttime_data(date=day, force_processing=args.force)
+            await process_nighttime_data(date=day,
+                                         lonmin=args.lonmin, latmin=args.latmin, lonmax=args.lonmax, latmax=args.latmax,
+                                         force_processing=args.force)
 
 def run_pipeline():
     logger = logging.getLogger(__name__)

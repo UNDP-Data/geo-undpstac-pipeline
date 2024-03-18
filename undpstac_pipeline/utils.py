@@ -2,7 +2,7 @@ import os
 import math
 import uuid as _uu
 import requests
-from nighttimelights_pipeline.azblob import blob_exists_in_azure
+from undpstac_pipeline.azblob import blob_exists_in_azure
 from tqdm import tqdm
 import datetime
 import logging

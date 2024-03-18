@@ -1,16 +1,16 @@
 import multiprocessing
 import asyncio
-from nighttimelights_pipeline.utils import should_download
-from nighttimelights_pipeline.colorado_eog import get_dnb_files, download_file
-from nighttimelights_pipeline.const import DNB_FILE_TYPES, AZURE_DNB_COLLECTION_FOLDER, COG_CONVERT_TIMEOUT,AIOHTTP_READ_CHUNKSIZE, COG_DOWNLOAD_TIMEOUT
+from undpstac_pipeline.utils import should_download
+from undpstac_pipeline.colorado_eog import get_dnb_files, download_file
+from undpstac_pipeline.const import DNB_FILE_TYPES, AZURE_DNB_COLLECTION_FOLDER, COG_CONVERT_TIMEOUT,AIOHTTP_READ_CHUNKSIZE, COG_DOWNLOAD_TIMEOUT
 import datetime
 import logging
 import os
 import tqdm
 from osgeo import gdal
-from nighttimelights_pipeline.validate import validate
-from nighttimelights_pipeline.azblob import upload
-from nighttimelights_pipeline.stac import update_undp_stac
+from undpstac_pipeline.validate import validate
+from undpstac_pipeline.azblob import upload
+from undpstac_pipeline.stac import update_undp_stac
 
 
 gdal.UseExceptions()
@@ -141,6 +141,10 @@ async def process_nighttime_data(date: datetime.date = None,
                                  file_type=DNB_FILE_TYPES.DNB,
                                  DOWNLOAD_TIMEOUT=COG_DOWNLOAD_TIMEOUT,
                                  CONVERT_TIMEOUT=COG_CONVERT_TIMEOUT,
+                                 lonmin=None,
+                                 latmin=None,
+                                 lonmax=None,
+                                 latmax=None,
                                  force_processing=False
                                  ):
     """
@@ -224,7 +228,7 @@ async def process_nighttime_data(date: datetime.date = None,
                                       timeout_event=timeout_event,
                                       use_translate=False,
                                       description=dnb_file_desc,
-                                      #lonmin=0, lonmax=5, latmin=-5, latmax=0
+                                      lonmin=lonmin, latmin=latmin, lonmax=lonmax, latmax=latmax
                                       )
                 )
                 cog_task.set_name(dnb_file_type)
