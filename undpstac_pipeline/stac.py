@@ -308,10 +308,14 @@ def update_undp_stac(
         footprint=footprint
     )
 
-    items = list(time_path_catalog.get_items(item_id,recursive=True))
+    items = time_path_catalog.get_items(item_id,recursive=True)
+    for item in items:
+        if item.id == daily_dnb_item.id:
+            time_path_catalog.remove_item(item_id=item.id)
+    time_path_catalog.add_item(daily_dnb_item)
 
-    if not items:
-        time_path_catalog.add_item(daily_dnb_item)
+
+
 
     root_catalog.normalize_hrefs(root_href=az_stacio.container_client.url,
                                  strategy=CustomLayoutStrategy(catalog_func=catalog_f, item_func=item_f))
