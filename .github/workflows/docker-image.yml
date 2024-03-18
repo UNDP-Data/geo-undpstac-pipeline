@@ -7,7 +7,7 @@ on:
     branches: [ "main" ]
 
 env:
-  IMAGE_NAME: geo-nightlights
+  IMAGE_NAME: ${{ github.repository}}
 
 jobs:
   build-and-push-image:

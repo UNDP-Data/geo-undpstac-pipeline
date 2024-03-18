@@ -1,0 +1,26 @@
+apiVersion: "2023-05-01"
+location: northeurope
+properties:
+  osType: Linux
+  restartPolicy: Never
+  containers:
+    - name: nighttimelights-test
+      properties:
+        environmentVariables:
+          - name: AZURE_STORAGE_CONNECTION_STRING
+            value: $AZURE_STORAGE_CONNECTION_STRING
+        image: undpgeohub.azurecr.io/undp-data/geo-nightlights:main
+        command: "python -m nighttimelights_pipeline.cli daily -y 2024 -m 1 -d 24 -f"
+        resources:
+          requests:
+            cpu: 2
+            memoryInGB: 8
+  imageRegistryCredentials:
+    - server: undpgeohub.azurecr.io
+      username: $AZURE_REGISTRY_USERNAME
+      password: $AZURE_REGISTRY_PASSWORD
+tags: {}
+type: Microsoft.ContainerInstance/containerGroups
+
+
+
