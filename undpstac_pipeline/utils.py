@@ -6,8 +6,8 @@ from undpstac_pipeline.azblob import blob_exists_in_azure
 from tqdm import tqdm
 import datetime
 import logging
-from osgeo import gdal
-import json
+from osgeo import gdal, osr
+from shapely.geometry import Polygon, mapping
 from datetime import timezone
 
 
@@ -97,3 +97,25 @@ def extract_date_from_dnbfile(dnb_file_name=None):
     return item_date
 
 
+
+def get_bbox_and_footprint(raster_path=None):
+    ds = gdal.OpenEx(raster_path, gdal.OF_RASTER )
+    ulx, xres, xskew, uly, yskew, yres = ds.GetGeoTransform()
+    lrx = ulx + (ds.RasterXSize * xres)
+    lry = uly + (ds.RasterYSize * yres)
+    src_srs = osr.SpatialReference()
+    src_srs.ImportFromWkt(ds.GetProjection())
+    dst_srs = src_srs.CloneGeogCS()
+    ct = osr.CoordinateTransformation(src_srs, dst_srs)
+    uly, ulx, _ =  [round(e, 2) for e in ct.TransformPoint(ulx, uly)]
+    lry, lrx, _ = [round(e,2) for e in ct.TransformPoint(lrx, lry)]
+    bbox = [ulx, lry, lrx, uly]
+
+    footprint = Polygon([
+        [ulx, uly],
+        [lrx, uly],
+        [lrx, lry],
+        [ulx, lry],
+        [ulx, uly]
+    ])
+    return bbox, mapping(footprint)

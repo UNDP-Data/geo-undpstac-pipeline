@@ -3,11 +3,9 @@ import itertools
 from typing import Any
 from urllib.parse import urlparse
 import pystac
-from pystac.extensions.eo import Band, EOExtension
+from pystac.extensions.eo import  EOExtension
 from pystac.provider import Provider, ProviderRole
 from pystac import stac_io, HREF
-from osgeo import gdal, osr
-from shapely.geometry import Polygon, mapping
 from tempfile import TemporaryDirectory
 import os
 from undpstac_pipeline import const
@@ -89,27 +87,6 @@ def create_stac_catalog(
     #catalog.normalize_hrefs(strategy=TemplateLayoutStrategy(catalog_template='${catalog}'), root_href=root_href)
     return catalog
 
-def get_bbox_and_footprint(raster_path=None):
-    ds = gdal.OpenEx(raster_path, gdal.OF_RASTER )
-    ulx, xres, xskew, uly, yskew, yres = ds.GetGeoTransform()
-    lrx = ulx + (ds.RasterXSize * xres)
-    lry = uly + (ds.RasterYSize * yres)
-    src_srs = osr.SpatialReference()
-    src_srs.ImportFromWkt(ds.GetProjection())
-    dst_srs = src_srs.CloneGeogCS()
-    ct = osr.CoordinateTransformation(src_srs, dst_srs)
-    uly, ulx, _ =  [round(e, 2) for e in ct.TransformPoint(ulx, uly)]
-    lry, lrx, _ = [round(e,2) for e in ct.TransformPoint(lrx, lry)]
-    bbox = [ulx, lry, lrx, uly]
-
-    footprint = Polygon([
-        [ulx, uly],
-        [lrx, uly],
-        [lrx, lry],
-        [ulx, lry],
-        [ulx, uly]
-    ])
-    return bbox, mapping(footprint)
 
 def create_stac_item(item_path=None):
 
@@ -140,7 +117,7 @@ def create_dnb_stac_item(
                         daily_dnb_cloudmask_blob_path=None,
                         add_eo_extension=True,
                         az_stacio=None,
-                        file_type=None
+                        file_type=None, bbox=None, footprint=None
 ):
 
 
@@ -149,8 +126,8 @@ def create_dnb_stac_item(
     dnb_blob_client = az_stacio.container_client.get_blob_client(blob=daily_dnb_blob_path)
     dnb_cloudmask_blob_client = az_stacio.container_client.get_blob_client(blob=daily_dnb_cloudmask_blob_path)
 
-    # both assets have same exptent
-    bbox, footprint = get_bbox_and_footprint(raster_path=dnb_blob_client.url)
+
+
     _, item_name = os.path.split(daily_dnb_blob_path)
     item_date = u.extract_date_from_dnbfile(item_name)
 
@@ -242,7 +219,9 @@ def update_undp_stac(
         daily_dnb_blob_path=None,
         daily_dnb_cloudmask_blob_path=None,
         file_type=None,
-        collection_folder=const.AZURE_DNB_COLLECTION_FOLDER
+        collection_folder=const.AZURE_DNB_COLLECTION_FOLDER,
+        bbox=None,
+        footprint=None
     ):
     """
 
@@ -324,7 +303,9 @@ def update_undp_stac(
         daily_dnb_cloudmask_blob_path=daily_dnb_cloudmask_blob_path,
         add_eo_extension=False,
         az_stacio=az_stacio,
-        file_type=file_type
+        file_type=file_type,
+        bbox=bbox,
+        footprint=footprint
     )
 
     items = list(time_path_catalog.get_items(item_id,recursive=True))
