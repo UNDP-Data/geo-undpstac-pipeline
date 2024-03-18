@@ -145,7 +145,8 @@ async def process_nighttime_data(date: datetime.date = None,
                                  latmin=None,
                                  lonmax=None,
                                  latmax=None,
-                                 force_processing=False
+                                 force_processing=False,
+                                 concurrent=False
                                  ):
     """
 
@@ -217,50 +218,64 @@ async def process_nighttime_data(date: datetime.date = None,
 
 
             ################### convert to COG ########################
-            convert2cogtasks = list()
-            for dnb_file_type, downloaded_dnb_file in downloaded_dnb_files.items():
-                local_cog_file = os.path.splitext(downloaded_dnb_file)[0]
-                _, dnb_file_desc = remote_dnb_files[dnb_file_type]
-                cog_task = asyncio.ensure_future(
-                    asyncio.to_thread(tiff2cog,
-                                      src_path=downloaded_dnb_file,
-                                      dst_path=local_cog_file,
-                                      timeout_event=timeout_event,
-                                      use_translate=False,
-                                      description=dnb_file_desc,
-                                      lonmin=lonmin, latmin=latmin, lonmax=lonmax, latmax=latmax
-                                      )
+            if concurrent:
+                convert2cogtasks = list()
+                for dnb_file_type, downloaded_dnb_file in downloaded_dnb_files.items():
+                    local_cog_file = os.path.splitext(downloaded_dnb_file)[0]
+                    _, dnb_file_desc = remote_dnb_files[dnb_file_type]
+                    cog_task = asyncio.ensure_future(
+                        asyncio.to_thread(tiff2cog,
+                                          src_path=downloaded_dnb_file,
+                                          dst_path=local_cog_file,
+                                          timeout_event=timeout_event,
+                                          use_translate=False,
+                                          description=dnb_file_desc,
+                                          lonmin=lonmin, latmin=latmin, lonmax=lonmax, latmax=latmax
+                                          )
+                    )
+                    cog_task.set_name(dnb_file_type)
+                    convert2cogtasks.append(cog_task)
+
+                done, pending = await asyncio.wait(
+                    convert2cogtasks,
+                    return_when=asyncio.FIRST_EXCEPTION,
+                    timeout=CONVERT_TIMEOUT,
                 )
-                cog_task.set_name(dnb_file_type)
-                convert2cogtasks.append(cog_task)
 
-            done, pending = await asyncio.wait(
-                convert2cogtasks,
-                return_when=asyncio.FIRST_EXCEPTION,
-                timeout=CONVERT_TIMEOUT,
-            )
+                if len(done) == 0:
+                    error_message = f'Failed to convert {list(downloaded_dnb_files.values())} to COG in {CONVERT_TIMEOUT} seconds.'
+                    logger.error(error_message)
+                    timeout_event.set()
 
-            if len(done) == 0:
-                error_message = f'Failed to convert {list(downloaded_dnb_files.values())} to COG in {CONVERT_TIMEOUT} seconds.'
-                logger.error(error_message)
-                timeout_event.set()
+                for pending_future in pending:
+                    try:
+                        pending_future.cancel()
+                        await pending_future
+                    except asyncio.exceptions.CancelledError as e:
+                        raise
 
-            for pending_future in pending:
-                try:
-                    pending_future.cancel()
-                    await pending_future
-                except asyncio.exceptions.CancelledError as e:
-                    raise
+                for done_future in done:
+                    try:
+                        converted_cog_path = await done_future
+                        dnb_file_type = done_future.get_name()
+                        logger.info(f'Successfully created {dnb_file_type} COG {converted_cog_path}')
+                        local_cog_files[dnb_file_type] = converted_cog_path
 
-            for done_future in done:
-                try:
-                    converted_cog_path = await done_future
-                    dnb_file_type = done_future.get_name()
-                    logger.info(f'Successfully created {dnb_file_type} COG {converted_cog_path}')
+                    except Exception as e:
+                        raise
+            else:
+                for dnb_file_type, downloaded_dnb_file in downloaded_dnb_files.items():
+                    local_cog_file = os.path.splitext(downloaded_dnb_file)[0]
+                    _, dnb_file_desc = remote_dnb_files[dnb_file_type]
+                    converted_cog_path = tiff2cog(
+                        src_path = downloaded_dnb_file,
+                        dst_path = local_cog_file,
+                        timeout_event = timeout_event,
+                        use_translate = False,
+                        description = dnb_file_desc,
+                        lonmin = lonmin, latmin = latmin, lonmax = lonmax, latmax = latmax
+                    )
                     local_cog_files[dnb_file_type] = converted_cog_path
-
-                except Exception as e:
-                    raise
 
             ################### upload to azure########################
             for dnb_file_type, local_cog_file in local_cog_files.items():
