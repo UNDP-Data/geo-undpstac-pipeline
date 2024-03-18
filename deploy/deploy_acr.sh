@@ -1,6 +1,6 @@
 #!/bin/bash
 
-echo 'publishing nighttimelights'
+echo 'publishing undpstac pipeline'
 eval  $(cat ../.env | sed 's/^/export /')
 envsubst < manifest.template.yml > nighttimelights.yml
 az container delete --resource-group undpdpbppssdganalyticsgeo --name nighttimelights --yes

@@ -9,4 +9,4 @@ COPY . /app
 RUN pip3 install --no-cache-dir -r requirements.txt
 
 
-CMD ["python3", "-m",  "nighttimelights_pipeline.cli"]
+CMD ["python3", "-m",  "undpstac_pipeline.cli"]
