@@ -9,12 +9,12 @@ properties:
         environmentVariables:
           - name: AZURE_STORAGE_CONNECTION_STRING
             value: $AZURE_STORAGE_CONNECTION_STRING
-        image: undpgeohub.azurecr.io/undp-data/geo-nightlights:main
+        image: undpgeohub.azurecr.io/undp-data/geo-undpstac-pipeline:main
         command: ["python", "-m", "undpstac_pipeline.cli", "daily", "-y 2024", "-m 1", "-d 24", "-f"]
         resources:
           requests:
-            cpu: 2
-            memoryInGB: 8
+            cpu: 4
+            memoryInGB: 16
   imageRegistryCredentials:
     - server: undpgeohub.azurecr.io
       username: $AZURE_REGISTRY_USERNAME
