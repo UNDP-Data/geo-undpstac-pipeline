@@ -327,7 +327,9 @@ def update_undp_stac(
         file_type=file_type
     )
 
-    if not time_path_catalog.get_items(item_id,recursive=True):
+    items = list(time_path_catalog.get_items(item_id,recursive=True))
+
+    if not items:
         time_path_catalog.add_item(daily_dnb_item)
 
     root_catalog.normalize_hrefs(root_href=az_stacio.container_client.url,

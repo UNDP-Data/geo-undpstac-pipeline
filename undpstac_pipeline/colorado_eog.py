@@ -67,7 +67,7 @@ async def download_file(file_url=None, no_attempts=3, connect_timeout=250, data_
                     async with session.get(file_url, timeout=data_read_timeout) as response:
                         if response.status == 200:
                             remote_size = int(response.headers['Content-Length'])
-                            progressbar = tqdm.tqdm(total=remote_size, desc=dst_file_path, unit='iB',
+                            progressbar = tqdm.tqdm(total=remote_size, desc=f'Downloading {dst_file_path}', unit='iB',
                                                     unit_scale=True)
                             async with aiofiles.open(dst_file_path, 'wb') as local_file:
                                 while True:
