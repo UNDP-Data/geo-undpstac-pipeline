@@ -255,7 +255,7 @@ def update_undp_stac(
 
     root_catalog_blob_path = const.STAC_CATALOG_NAME
     root_catalog_url = os.path.join(az_stacio.container_client.url, root_catalog_blob_path)
-    root_catalog_exists = blob_exists_in_azure(blob_path=root_catalog_blob_path, container_client=az_stacio.container_client)
+    root_catalog_exists, url = blob_exists_in_azure(blob_path=root_catalog_blob_path, container_client=az_stacio.container_client)
 
     if not root_catalog_exists :
         root_catalog = create_undp_stac_tree()
