@@ -36,10 +36,10 @@ async def main():
     daily_parser.add_argument('-m', '--month', type=int, help='The month of the data to download', required=False)
     daily_parser.add_argument('-d', '--day' , type=int, help='The day of the data to download', required=False)
     #lonmin=-180, latmin=-65, lonmax=180, latmax=75
-    daily_parser.add_argument( '--lonmin' , type=float, help='The western bound', required=False, default=-180)
-    daily_parser.add_argument( '--latmin' , type=float, help='The southern bound', required=False, default=-65)
-    daily_parser.add_argument( '--lonmax' , type=float, help='The eastern bound', required=False, default=180)
-    daily_parser.add_argument( '--latmax' , type=float, help='The northern bound', required=False, default=75)
+    daily_parser.add_argument( '--lonmin' , type=float, help='The western bound', required=False, default=None)
+    daily_parser.add_argument( '--latmin' , type=float, help='The southern bound', required=False, default=None)
+    daily_parser.add_argument( '--lonmax' , type=float, help='The eastern bound', required=False, default=None)
+    daily_parser.add_argument( '--latmax' , type=float, help='The northern bound', required=False, default=None)
 
     daily_parser.add_argument('-f', '--force' , type=bool, action=argparse.BooleanOptionalAction, help='Ignore exiting COG and process again', required=False)
     daily_parser.add_argument('-l', '--log-level', help='Set log level ', type=str, choices=['INFO', 'DEBUG', 'TRACE'],
@@ -53,10 +53,10 @@ async def main():
                                 help='The start date from where the pipeline will start processing the VIIRS DNB mosaics')
     archive_parser.add_argument('-e', '--end-date', type=lambda d: datetime.datetime.strptime(d, '%Y-%m-%d').date(), required=True,
                                 help='The end date signalizing the last day for which the VIIRS DNB mosaics will be processed')
-    archive_parser.add_argument('--lonmin', type=float, help='The western bound', required=False, default=-180)
-    archive_parser.add_argument('--latmin', type=float, help='The southern bound', required=False, default=-65)
-    archive_parser.add_argument('--lonmax', type=float, help='The eastern bound', required=False, default=180)
-    archive_parser.add_argument('--latmax', type=float, help='The northern bound', required=False, default=75)
+    archive_parser.add_argument('--lonmin', type=float, help='The western bound', required=False, default=None)
+    archive_parser.add_argument('--latmin', type=float, help='The southern bound', required=False, default=None)
+    archive_parser.add_argument('--lonmax', type=float, help='The eastern bound', required=False, default=None)
+    archive_parser.add_argument('--latmax', type=float, help='The northern bound', required=False, default=None)
 
 
     archive_parser.add_argument('-f', '--force', type=bool, action=argparse.BooleanOptionalAction,
