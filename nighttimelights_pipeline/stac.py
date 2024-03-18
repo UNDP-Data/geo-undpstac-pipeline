@@ -134,8 +134,14 @@ def create_stac_item(item_path=None):
 
     return item
 
-def create_dnb_stac_item(daily_dnb_blob_path=None,
-                         daily_dnb_cloudmask_blob_path=None, add_eo_extension=True, az_stacio=None, file_type=None):
+def create_dnb_stac_item(
+                        item_id=None,
+                        daily_dnb_blob_path=None,
+                        daily_dnb_cloudmask_blob_path=None,
+                        add_eo_extension=True,
+                        az_stacio=None,
+                        file_type=None
+):
 
 
 
@@ -150,7 +156,7 @@ def create_dnb_stac_item(daily_dnb_blob_path=None,
 
     item = pystac.Item(#id=u.generate_id(name=item_path),
                         #id=f'nighttime-lights-{item_date.strftime("%Y-%m-%d")}',
-                        id=f'SVDNB_npp_d{item_date.strftime("%Y%m%d")}',
+                        id=item_id,
                         geometry=footprint,
                         bbox=bbox,
                         datetime=item_date,
@@ -311,15 +317,18 @@ def update_undp_stac(
     # else:
     #     year_month_catalog = pystac.Catalog.from_file(dnb_year_month_catalog_blob_path)
 
-
+    item_id = f'SVDNB_npp_d{item_date.strftime("%Y%m%d")}'
     daily_dnb_item = create_dnb_stac_item(
+        item_id=item_id,
         daily_dnb_blob_path=daily_dnb_blob_path,
         daily_dnb_cloudmask_blob_path=daily_dnb_cloudmask_blob_path,
         add_eo_extension=False,
         az_stacio=az_stacio,
         file_type=file_type
     )
-    time_path_catalog.add_item(daily_dnb_item)
+
+    if not time_path_catalog.get_items(id=item_id,recursive=True):
+        time_path_catalog.add_item(daily_dnb_item)
 
     root_catalog.normalize_hrefs(root_href=az_stacio.container_client.url,
                                  strategy=CustomLayoutStrategy(catalog_func=catalog_f, item_func=item_f))

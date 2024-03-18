@@ -8,7 +8,7 @@ properties:
       properties:
         environmentVariables:
           - name: AZURE_STORAGE_CONNECTION_STRING
-            value: $AZURE_STORAGE_CONNECTION_STRING
+            value: DefaultEndpointsProtocol=https;AccountName=undpgeohub;AccountKey=18MsQOGbJJTciYjA5DrQPJjtDj0+M09wvC556jG5YUHQ3o4hpe1Na+r30DTe7f7NQgF5Cy8wXy2Z+AStU2lYTg==;EndpointSuffix=core.windows.net
         image: undpgeohub.azurecr.io/undp-data/geo-nightlights:main
         command: ["python", "-m", "nighttimelights_pipeline.cli", "daily", "-y 2024", "-m 1", "-d 24", "-f"]
         resources:
@@ -17,8 +17,8 @@ properties:
             memoryInGB: 8
   imageRegistryCredentials:
     - server: undpgeohub.azurecr.io
-      username: $AZURE_REGISTRY_USERNAME
-      password: $AZURE_REGISTRY_PASSWORD
+      username: undpgeohub
+      password: 7OF=G2a3PytkRLoDNQ9AHShq8bqBQP+G
 tags: {}
 type: Microsoft.ContainerInstance/containerGroups
 

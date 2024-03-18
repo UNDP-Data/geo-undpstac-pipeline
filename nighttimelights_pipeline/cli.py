@@ -47,6 +47,8 @@ async def main():
                                 help='The start date from where the pipeline will start processing the VIIRS DNB mosaics')
     archive_parser.add_argument('-e', '--end-date', type=lambda d: datetime.datetime.strptime(d, '%Y-%m-%d').date(), required=True,
                                 help='The end date signalizing the last day for which the VIIRS DNB mosaics will be processed')
+    archive_parser.add_argument('-f', '--force', type=bool, action=argparse.BooleanOptionalAction,
+                              help='Ignore exiting COG and process again', required=False)
     archive_parser.add_argument('-l', '--log-level', help='Set log level ', type=str, choices=['INFO', 'DEBUG', 'TRACE'],
                               default='INFO')
 
