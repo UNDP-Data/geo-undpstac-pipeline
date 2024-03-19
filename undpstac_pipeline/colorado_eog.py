@@ -55,9 +55,7 @@ async def download_file(file_url=None, no_attempts=3, connect_timeout=250, data_
         _, orig_file_name = os.path.split(parse_res.path)
         file_name = f'{orig_file_name}.local'
         dst_file_path = f'/tmp/{file_name}'
-        if os.path.exists(dst_file_path):
-            logger.debug(f'Returning local file {dst_file_path}')
-            return dst_file_path
+
         timeout = aiohttp.ClientTimeout(connect=connect_timeout, sock_read=data_read_timeout)
 
         async with aiohttp.ClientSession(timeout=timeout) as session:
@@ -67,6 +65,13 @@ async def download_file(file_url=None, no_attempts=3, connect_timeout=250, data_
                     async with session.get(file_url, timeout=data_read_timeout) as response:
                         if response.status == 200:
                             remote_size = int(response.headers['Content-Length'])
+                            if os.path.exists(dst_file_path):
+                                if os.path.getsize(dst_file_path) == remote_size:
+                                    logger.debug(f'Returning local file {dst_file_path}')
+                                    return dst_file_path
+                                else:
+                                    os.remove(dst_file_path)
+
                             progressbar = tqdm.tqdm(total=remote_size, desc=f'Downloading {dst_file_path}', unit='iB',
                                                     unit_scale=True)
                             async with aiofiles.open(dst_file_path, 'wb') as local_file:

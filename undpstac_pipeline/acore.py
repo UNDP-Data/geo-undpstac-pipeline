@@ -1,6 +1,6 @@
 import multiprocessing
 import asyncio
-from undpstac_pipeline.utils import should_download, get_bbox_and_footprint
+from undpstac_pipeline.utils import should_download, get_bbox_and_footprint, tranform_bbox
 from undpstac_pipeline.colorado_eog import get_dnb_files, download_file
 from undpstac_pipeline.const import DNB_FILE_TYPES, AZURE_DNB_COLLECTION_FOLDER, COG_CONVERT_TIMEOUT,AIOHTTP_READ_CHUNKSIZE, COG_DOWNLOAD_TIMEOUT
 import datetime
@@ -19,11 +19,156 @@ logger = logging.getLogger(__name__)
 
 
 def gdal_callback(complete, message, data):
+
     timeout_event, progressbar = data
     progressbar.update(complete * 100)
     if timeout_event and timeout_event.is_set():
         logger.info(f'GDAL was signalled to stop...')
         return 0
+
+
+def set_metadata(src_path=None, dst_path=None, description=None):
+    logger.info(f'Converting {src_path} to COG')
+    if os.path.exists(dst_path): os.remove(dst_path)
+    logger.info(f'Setting custom metadata ')
+    ctime = datetime.datetime.fromtimestamp(os.path.getctime(src_path)).strftime('%Y%m%d%H%M%S')
+    src_cog_ds = gdal.OpenEx(src_path, gdal.OF_UPDATE, )
+    band = src_cog_ds.GetRasterBand(1)
+    # COGS do not like to be edited. So adding metadata will BREAK them
+    src_cog_ds.SetMetadata({f'DNB_FILE_SIZE_{ctime}': f'{os.path.getsize(src_path)}'})
+    band.SetMetadata({'DESCRIPTION': description})
+    del src_cog_ds
+
+def warp_cog(
+        src_path=None, dst_path=None,
+        timeout_event=None,description=None,
+        lonmin=-180, latmin=-65, lonmax=178, latmax=75
+
+    ):
+
+    set_metadata(src_path=src_path, dst_path=dst_path, description=description)
+
+    logger.info(f'running gdalwarp on {src_path}')
+    progressbar = tqdm.tqdm(range(0, 100), desc=f'Creating COG {dst_path}', unit_scale=True)
+
+    wo = gdal.WarpOptions(
+        format='COG',
+        srcSRS='EPSG:4326',
+        dstSRS='EPSG:3857',
+        overviewLevel=None,
+        #multithread=True,
+        outputBounds=[lonmin, latmin, lonmax, latmax],  # <xmin> <ymin> <xmax> <ymax>
+        outputBoundsSRS='EPSG:4326',
+        resampleAlg='NEAREST',
+        targetAlignedPixels=True,
+        xRes=500,
+        yRes=500,
+        creationOptions=[
+            "BLOCKSIZE=256",
+            "OVERVIEWS=IGNORE_EXISTING",
+            "COMPRESS=ZSTD",
+            "LEVEL=9",
+            "PREDICTOR=YES",
+            "OVERVIEW_RESAMPLING=NEAREST",
+            "BIGTIFF=IF_SAFER",
+            "NUM_THREADS=ALL_CPUS",
+            "ADD_ALPHA=NO",
+        ],
+        copyMetadata=True,
+        callback=gdal_callback,
+        callback_data=(timeout_event, progressbar)
+    )
+    cog_ds = gdal.Warp(
+        srcDSOrSrcDSTab=src_path,
+        destNameOrDestDS=dst_path,
+        options=wo,
+    )
+
+    del cog_ds
+    warnings, errors, details = validate(dst_path, full_check=True)
+    if warnings:
+        for wm in warnings:
+            logger.warning(wm)
+    if errors:
+        for em in errors:
+            logger.error(em)
+        raise Exception('\n'.join(errors))
+    return dst_path
+
+def translate_cog(
+        src_path=None, dst_path=None,
+        timeout_event=None,description=None,
+        lonmin=-179.9999, latmin=-65, lonmax=179.9999, latmax=75
+
+    ):
+
+    set_metadata(src_path=src_path, dst_path=dst_path, description=description)
+
+    logger.info(f'running gdal_translate on {src_path}')
+    progressbar = tqdm.tqdm(range(0, 100), desc=f'Creating COG {dst_path}', unit_scale=True)
+    creationOptions = [
+
+        "BLOCKSIZE=256",
+        "OVERVIEWS=IGNORE_EXISTING",
+        "COMPRESS=ZSTD",
+        "LEVEL=9",
+        "PREDICTOR=YES",
+        "OVERVIEW_RESAMPLING=NEAREST",
+        "BIGTIFF=IF_SAFER",
+        "TARGET_SRS=EPSG:3857",
+        # "RES=500",
+        # f"EXTENT={lonmin},{latmin},{lonmax},{latmax}"
+        "RESAMPLING=NEAREST",
+        # "STATISTICS=YES",
+        "ADD_ALPHA=NO",
+        #"COPY_SRC_MDD=YES"
+
+    ],
+    # to = gdal.TranslateOptions(format='COG',creationOptions=creationOptions,xRes=500, yRes=500,
+    #                            projWin=(lonmin, latmax, lonmax, latmin))
+    print(lonmin, latmin, lonmax, latmax)
+    xmin, ymin, xmax, ymax = tranform_bbox(lonmin=lonmin,lonmax=lonmax, latmin=latmin, latmax=latmax)
+    print(xmin, ymin, xmax, ymax)
+    cog_ds = gdal.Translate(
+        destName=dst_path,
+        srcDS=src_path,
+        format='COG',
+        creationOptions=[
+
+            "BLOCKSIZE=256",
+            "OVERVIEWS=IGNORE_EXISTING",
+            "COMPRESS=ZSTD",
+            "LEVEL=9",
+            "PREDICTOR=YES",
+            "OVERVIEW_RESAMPLING=NEAREST",
+            "BIGTIFF=IF_SAFER",
+            "TARGET_SRS=EPSG:3857",
+            #"RES=500",
+            #f"EXTENT={xmin},{ymin},{xmax},{ymax}"
+            "RESAMPLING=NEAREST",
+            # "STATISTICS=YES",
+            "ADD_ALPHA=NO",
+            #"COPY_SRC_MDD=YES"
+
+        ],
+        stats=True,
+        xRes= 0.00449,
+        yRes= 0.00449,
+        projWin=(lonmin, latmax, lonmax, latmin),
+        projWinSRS='EPSG:4326',
+        callback=gdal_callback,
+        callback_data=(timeout_event, progressbar)
+    )
+    del cog_ds
+    warnings, errors, details = validate(dst_path, full_check=True)
+    if warnings:
+        for wm in warnings:
+            logger.warning(wm)
+    if errors:
+        for em in errors:
+            logger.error(em)
+        raise Exception('\n'.join(errors))
+    return dst_path
 
 
 def tiff2cog(src_path=None, dst_path=None, timeout_event=None, use_translate=True, description=None,
@@ -146,7 +291,8 @@ async def process_nighttime_data(date: datetime.date = None,
                                  lonmax=None,
                                  latmax=None,
                                  force_processing=False,
-                                 concurrent=False
+                                 concurrent=False,
+                                 archive=False
                                  ):
     """
 
@@ -197,23 +343,33 @@ async def process_nighttime_data(date: datetime.date = None,
                 download_task.set_name(dnb_file_type)
                 download_futures.append(download_task)
             downloaded, not_downloaded = await asyncio.wait(download_futures, timeout=DOWNLOAD_TIMEOUT,
-                                                            return_when=asyncio.FIRST_EXCEPTION)
-            for downloaded_future in downloaded:
-                try:
-                    downloaded_file = await downloaded_future
-                    task_name = downloaded_future.get_name()
-                    logger.info(f'Successfully downloaded {task_name} to {downloaded_file}')
-                    downloaded_dnb_files[task_name] = downloaded_file
-                except Exception as e:
-                    raise e
-            for pending_future in not_downloaded:
-                try:
-                    pending_future.cancel()
-                    await pending_future
-                except asyncio.exceptions.CancelledError as e:
-                    dnb_file_type = pending_future.get_name()
-                    msg = f'Failed to download {dnb_file_type} from {remote_dnb_files[dnb_file_type][0]}'
-                    raise Exception(msg)
+                                                   return_when=asyncio.FIRST_EXCEPTION)
+
+            if downloaded:
+                m = []
+                for downloaded_future in downloaded:
+                    try:
+                        downloaded_file = await downloaded_future
+                        task_name = downloaded_future.get_name()
+                        logger.info(f'Successfully downloaded {task_name} to {downloaded_file}')
+                        downloaded_dnb_files[task_name] = downloaded_file
+                    except Exception as e:
+                        m.append(str(e))
+                if m:
+                    raise Exception('\n'.join(m))
+
+            if not_downloaded:
+                m = []
+                for pending_future in not_downloaded:
+                    try:
+                        pending_future.cancel()
+                        await pending_future
+                    except asyncio.exceptions.CancelledError as e:
+                        dnb_file_type = pending_future.get_name()
+                        msg = f'Failed to download {dnb_file_type} from {remote_dnb_files[dnb_file_type][0]}'
+                        m.append(msg)
+                if m:
+                    raise Exception('\n'.join(m))
 
 
 
@@ -267,13 +423,12 @@ async def process_nighttime_data(date: datetime.date = None,
                 for dnb_file_type, downloaded_dnb_file in downloaded_dnb_files.items():
                     local_cog_file = os.path.splitext(downloaded_dnb_file)[0]
                     _, dnb_file_desc = remote_dnb_files[dnb_file_type]
-                    converted_cog_path = tiff2cog(
+                    converted_cog_path = warp_cog(
                         src_path = downloaded_dnb_file,
                         dst_path = local_cog_file,
                         timeout_event = timeout_event,
-                        use_translate = False,
                         description = dnb_file_desc,
-                        lonmin = lonmin, latmin = latmin, lonmax = lonmax, latmax = latmax
+                        #lonmin = lonmin, latmin = latmin, lonmax = lonmax, latmax = latmax
                     )
                     local_cog_files[dnb_file_type] = converted_cog_path
 
@@ -301,13 +456,15 @@ async def process_nighttime_data(date: datetime.date = None,
         else:
             logger.info(f'No nighttime lights data will be processed for {date} from Colorado EOG ')
 
-    except asyncio.CancelledError as ce:
 
+    except asyncio.CancelledError as ce:
         logger.info(f'Cancelling all tasks and actions...')
         timeout_event.set()
+        if archive:raise
+
     except Exception as e:
 
-        logger.error(f"Failed to process data for {date.strftime('%Y-%m-%d')}: {e}")
+        logger.error(f"Failed to process data for {date.strftime('%Y-%m-%d')}: {e.__class__.__name__} {e} ")
         raise
 
 
