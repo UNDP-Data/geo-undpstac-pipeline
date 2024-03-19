@@ -49,7 +49,7 @@ def should_download(blob_name: str=None, remote_file_url: str=None) -> bool:
     else:
         # remote file size
         remote_size = fetch_resource_size(url=remote_file_url)
-        info = gdal.Info(url, format='json')
+        info = gdal.Info(f'/vsicurl/{url}', format='json')
         metadata = info['metadata']['']
         for k, v in metadata.items():
             if k.startswith('DNB_FILE_SIZE'):
