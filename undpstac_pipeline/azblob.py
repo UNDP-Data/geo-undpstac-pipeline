@@ -42,58 +42,44 @@ def upload(
                 content_type: str = None,
                 overwrite: bool = True,
                 max_concurrency: int = 1,
-                container_client:ContainerClient = None
+                container_client:ContainerClient = None,
+                no_attempts=3
                 ):
 
     try:
+        for attempt in range(no_attempts):
+            try:
+                _, blob_name = os.path.split(dst_path)
+                local_container_client = container_client if container_client else get_container_client()
+                blob_client = local_container_client.get_blob_client(blob=dst_path)
+                if src_path:
+                    size = os.path.getsize(src_path)
+                    with tqdm.wrapattr(open(src_path, 'rb'), "read", total=size, desc=f'Uploading {blob_name}') as dataf:
+                        logger.debug(f'Uploading {src_path} to {dst_path}')
+                        blob_client.upload_blob(
+                            data=dataf,
+                            overwrite=overwrite,
+                            content_settings=ContentSettings(content_type=content_type) if content_type else None,
+                            max_concurrency=max_concurrency,
 
-        _, blob_name = os.path.split(dst_path)
-        #
-        # def _progress_(current, total) -> None:
-        #     logger.info(f'Current {current} vs total {total}')
-        #     progress = current / total * 100
-        #     rounded_progress = int(math.floor(progress))
-        #     logger.info(f'{blob_name} was uploaded - {rounded_progress}%')
-        #
-        # def callback(response):
-        #     current = response.context['upload_stream_current']  # There's also a 'download_stream_current'
-        #     total = response.context['data_stream_total']
-        #     logger.info(f'Current {current} vs total {total}')
-        #     if current is not None:
-        #         progress = current / total * 100
-        #         rounded_progress = int(math.floor(progress))
-        #         logger.info(f'{blob_name} was uploaded - {rounded_progress}%')
+                        )
+                elif data:
+                    logger.debug(f'Uploading bytes/data to {dst_path}')
+                    blob_client.upload_blob(
+                        data=data,
+                        overwrite=overwrite,
+                        content_settings=ContentSettings(content_type=content_type),
+                        #progress_hook=_progress_,
+                        max_concurrency=max_concurrency
 
-        local_container_client = container_client if container_client else get_container_client()
-
-        blob_client = local_container_client.get_blob_client(blob=dst_path)
-        if src_path:
-            size = os.path.getsize(src_path)
-            with tqdm.wrapattr(open(src_path, 'rb'), "read", total=size, desc=f'Uploading {blob_name}') as dataf:
-            #with open(src_path, 'rb') as dataf:
-                logger.debug(f'Uploading {src_path} to {dst_path}')
-                blob_client.upload_blob(
-                    data=dataf,
-                    overwrite=overwrite,
-                    content_settings=ContentSettings(content_type=content_type) if content_type else None,
-                    #progress_hook=_progress_,
-                    max_concurrency=max_concurrency,
-                    #raw_response_hook=callback
-                )
-        elif data:
-            logger.debug(f'Uploading bytes/data to {dst_path}')
-            blob_client.upload_blob(
-                data=data,
-                overwrite=overwrite,
-                content_settings=ContentSettings(content_type=content_type),
-                #progress_hook=_progress_,
-                max_concurrency=max_concurrency
-
-            )
-        else:
-            raise ValueError("Either 'src_path' or 'data' must be provided.")
-    except Exception as e:
-        raise e
+                    )
+                else:
+                    raise ValueError("Either 'src_path' or 'data' must be provided.")
+            except Exception as e:
+                if attempt == no_attempts - 1:
+                    raise e
+                logger.info(f'Failed to upload {src_path or data.__class__.name} in attempt no {attempt + 1}. Trying again ...')
+                continue
     finally:
         if not container_client:
             local_container_client.close()
