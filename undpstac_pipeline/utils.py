@@ -113,12 +113,11 @@ def get_bbox_and_footprint(raster_path=None):
     lrx = ulx + (ds.RasterXSize * xres)
     lry = uly + (ds.RasterYSize * yres)
     src_srs = osr.SpatialReference()
-    src_srs.ImportFromWkt(ds.GetProjection())
-    dst_srs = src_srs.CloneGeogCS()
+    src_srs.ImportFromWkt(ds.GetProjectionRef())
+    dst_srs = osr.SpatialReference()
+    dst_srs.ImportFromEPSG(4326)
     ct = osr.CoordinateTransformation(src_srs, dst_srs)
-
-    ymax, xmin, _ = ct.TransformPoint(ulx, uly)
-    ymin, xmax, _ = ct.TransformPoint(lrx, lry)
+    ymin,xmin,ymax,xmax =ct.TransformBounds(ulx,lry,lrx,uly,21)
 
     bbox = [xmin, ymin, xmax, ymax]
 
@@ -126,7 +125,11 @@ def get_bbox_and_footprint(raster_path=None):
         [xmin, ymax],
         [xmax, ymax],
         [xmax, ymin],
-        [xmin, ymin],
-        [xmin, ymax]
+        [xmin, ymin]
+
     ])
     return bbox, mapping(footprint)
+
+
+print(get_bbox_and_footprint('/vsicurl/https://undpgeohub.blob.core.windows.net/stacdata/nighttime-lights/2024/01/25/SVDNB_npp_d20240125.rade9d.tif'))
+
