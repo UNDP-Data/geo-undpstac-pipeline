@@ -1,7 +1,7 @@
 aiohttp
 shapely
 azure-storage-blob
-# GDAL>=3.2
+GDAL>=3.2
 python-dotenv
 tqdm
 pystac

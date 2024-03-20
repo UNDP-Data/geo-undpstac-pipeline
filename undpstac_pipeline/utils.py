@@ -116,15 +116,17 @@ def get_bbox_and_footprint(raster_path=None):
     src_srs.ImportFromWkt(ds.GetProjection())
     dst_srs = src_srs.CloneGeogCS()
     ct = osr.CoordinateTransformation(src_srs, dst_srs)
-    uly, ulx, _ =  [round(e, 2) for e in ct.TransformPoint(ulx, uly)]
-    lry, lrx, _ = [round(e,2) for e in ct.TransformPoint(lrx, lry)]
-    bbox = [ulx, lry, lrx, uly]
+
+    ymax, xmin, _ = ct.TransformPoint(ulx, uly)
+    ymin, xmax, _ = ct.TransformPoint(lrx, lry)
+
+    bbox = [xmin, ymin, xmax, ymax]
 
     footprint = Polygon([
-        [ulx, uly],
-        [lrx, uly],
-        [lrx, lry],
-        [ulx, lry],
-        [ulx, uly]
+        [xmin, ymax],
+        [xmax, ymax],
+        [xmax, ymin],
+        [xmin, ymin],
+        [xmin, ymax]
     ])
     return bbox, mapping(footprint)

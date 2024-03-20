@@ -63,6 +63,7 @@ def upload(
                             max_concurrency=max_concurrency,
 
                         )
+
                 elif data:
                     logger.debug(f'Uploading bytes/data to {dst_path}')
                     blob_client.upload_blob(
@@ -75,10 +76,11 @@ def upload(
                     )
                 else:
                     raise ValueError("Either 'src_path' or 'data' must be provided.")
+                return
             except Exception as e:
                 if attempt == no_attempts - 1:
                     raise e
-                logger.info(f'Failed to upload {src_path or data.__class__.name} in attempt no {attempt + 1}. Trying again ...')
+                logger.info(f'Failed to upload {src_path or "data"} in attempt no {attempt + 1}. Trying again ...')
                 continue
     finally:
         if not container_client:
