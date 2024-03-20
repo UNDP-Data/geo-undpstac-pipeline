@@ -131,5 +131,5 @@ def get_bbox_and_footprint(raster_path=None):
     return bbox, mapping(footprint)
 
 
-print(get_bbox_and_footprint('/vsicurl/https://undpgeohub.blob.core.windows.net/stacdata/nighttime-lights/2024/01/25/SVDNB_npp_d20240125.rade9d.tif'))
+
 

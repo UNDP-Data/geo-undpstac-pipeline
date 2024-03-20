@@ -48,7 +48,6 @@ def warp_cog(
     ):
 
     dtp = set_metadata(src_path=src_path, dst_path=dst_path, description=description)
-    print(dtp)
     logger.info(f'running gdalwarp on {src_path}')
     progressbar = tqdm.tqdm(range(0, 100), desc=f'Creating COG {dst_path}', unit_scale=True)
 
@@ -57,7 +56,7 @@ def warp_cog(
         srcSRS='EPSG:4326',
         dstSRS='EPSG:3857',
         overviewLevel=None,
-        outputType= gdal.GDT_Int16 if dtp == gdal.GDT_Float32 else dtp,
+        #outputType= gdal.GDT_Int16 if dtp == gdal.GDT_Float32 else dtp,
         #multithread=True,
         outputBounds=[lonmin, latmin, lonmax, latmax],  # <xmin> <ymin> <xmax> <ymax>
         outputBoundsSRS='EPSG:4326',
