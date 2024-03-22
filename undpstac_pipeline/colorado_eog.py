@@ -66,7 +66,7 @@ async def download_file(file_url=None, no_attempts=3, connect_timeout=250, data_
                         if response.status == 200:
                             remote_size = int(response.headers['Content-Length'])
                             if os.path.exists(dst_file_path):
-                                #return dst_file_path
+                                return dst_file_path
                                 if os.path.getsize(dst_file_path) == remote_size:
                                     logger.debug(f'Returning local file {dst_file_path}')
                                     return dst_file_path

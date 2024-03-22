@@ -97,15 +97,14 @@ def extract_date_from_dnbfile(dnb_file_name=None):
     return item_date
 
 
-def tranform_bbox(lonmin=None, latmin=None, lonmax=None, latmax=None):
+def transform_bbox(lonmin=None, latmin=None, lonmax=None, latmax=None):
     src_srs = osr.SpatialReference()
     src_srs.ImportFromEPSG(4326)
     dst_srs = osr.SpatialReference()
     dst_srs.ImportFromEPSG(3857)
     ct = osr.CoordinateTransformation(src_srs, dst_srs)
-    ymin, xmin, _ = [round(e, 2) for e in ct.TransformPoint(lonmin, latmin)]
-    ymax, xmax, _ = [round(e, 2) for e in ct.TransformPoint(lonmax, latmax)]
-    return xmin, ymin,xmax, ymax
+    ymin, xmin, ymax, xmax = ct.TransformBounds(lonmin, latmin, lonmax, latmax, 21)
+    return xmin, ymin, xmax, ymax
 
 def get_bbox_and_footprint(raster_path=None):
     ds = gdal.OpenEx(raster_path, gdal.OF_RASTER )

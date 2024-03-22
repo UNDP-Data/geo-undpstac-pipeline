@@ -34,10 +34,7 @@ def item_f(item:pystac.Item=None, parent_dir = None)->str:
 
 def to_set(self):
     return set(itertools.chain(*self.intervals))
-def as_timeranges(self):
-    return [TimeRange(*e) for e in self.intervals].pop()
-pystac.TemporalExtent.to_set = to_set
-pystac.TemporalExtent.as_timeranges = as_timeranges
+
 
 class AzureStacIO(stac_io.StacIO):
     # container_client = get_blob_service_client()
