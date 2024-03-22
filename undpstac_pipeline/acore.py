@@ -199,6 +199,7 @@ def warp_cog(
 
     wo = gdal.WarpOptions(
         format='COG',
+        warpMemoryLimit=500,
         srcSRS='EPSG:4326',
         dstSRS='EPSG:3857',
         overviewLevel=None,
