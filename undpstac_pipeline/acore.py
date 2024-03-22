@@ -1,6 +1,11 @@
 import multiprocessing
 import asyncio
-from undpstac_pipeline.utils import should_download, get_bbox_and_footprint
+import threading
+import concurrent
+import rasterio
+from rasterio.windows import Window
+from rasterio import dtypes
+from undpstac_pipeline.utils import should_download, get_bbox_and_footprint,transform_bbox
 from undpstac_pipeline.colorado_eog import get_dnb_files, download_file
 from undpstac_pipeline.const import DNB_FILE_TYPES, AZURE_DNB_COLLECTION_FOLDER, COG_CONVERT_TIMEOUT,AIOHTTP_READ_CHUNKSIZE, COG_DOWNLOAD_TIMEOUT
 import datetime
@@ -11,7 +16,6 @@ from osgeo import gdal
 from undpstac_pipeline.validate import validate
 from undpstac_pipeline.azblob import upload
 from undpstac_pipeline.stac import update_undp_stac
-
 
 gdal.UseExceptions()
 
@@ -40,6 +44,148 @@ def set_metadata(src_path=None, dst_path=None, description=None):
     band.SetMetadata({'DESCRIPTION': description})
     del src_cog_ds
     return dtp
+
+
+
+
+def scale_and_convert(src_arr=None, nodata=None, max_threshold=None, scale_factor=None, dtype=None ):
+    """
+    Convert float data to a different dtype
+
+    """
+    out_arr = (src_arr / scale_factor).astype(dtype)
+    pos = out_arr > max_threshold
+    out_arr[pos] = max_threshold
+    neg = out_arr < 0
+    out_arr[neg] = nodata
+
+    return out_arr
+
+def scale_and_io(src=None, dst=None, w=None, nodata=None, max_threshold=None, scale_factor=None, dtype=None ):
+    """
+    Convert float data to a different dtype
+
+    """
+    src_arr = src.read(1, window=w)
+    out_arr = (src_arr / scale_factor).astype(dtype)
+    pos = out_arr > max_threshold
+    out_arr[pos] = max_threshold
+    neg = out_arr < 0
+    out_arr[neg] = nodata
+    dst.write(out_arr, 1, window=w)
+
+def gen_block_windows(ds=None, factor=10, progress=None):
+    """
+    Generate block windows for a rasterio dataset scaled by factor
+    """
+    by, bx = ds.block_shapes[0]
+    by*=factor
+    bx*=factor
+    total_blocks = (ds.width // bx +1) * (ds.height // by + 1)
+    m = 0
+    for ji, window in ds.block_windows(1):
+        j, i = ji
+        jm = j % factor
+        im = i % factor
+        if jm == 0 and im == 0:
+            m+=1
+            if progress:
+                n = m/total_blocks*100
+                inc = n - progress.n
+                progress.update(n=inc)
+            width = bx if (window.col_off + bx) < ds.width else ds.width - window.col_off
+            height = by if (window.row_off + by) < ds.height else ds.height - window.row_off
+            #if m>(total_blocks/4):return
+            yield  Window(col_off=window.col_off , row_off=window.row_off, width=width, height=height)
+
+
+def preprocess_dnb(src_path=None, scale_factor=0.01, dtype='uint16', parallel=True):
+
+    assert dtypes.check_dtype(dtype), f'Invalid dtype={dtype}. Valid values are {dtypes.dtype_ranges.keys()}'
+    minr, maxr = dtypes.dtype_ranges[dtype]
+    nodata = maxr-35
+    max_threshold = nodata-1
+    dst_path = f'{src_path}i'
+    with rasterio.open(src_path) as src:
+        dst_profile = src.profile
+        dst_profile.update(dict(dtype=dtype), nodata=nodata)
+
+
+        with rasterio.open(dst_path, 'w', **dst_profile) as dst:
+
+            if not parallel:
+                with tqdm.tqdm(total=100., desc=f'Creating COG {dst_path}') as progressbar:
+                    [
+                        scale_and_io(src=src,dst=dst,nodata=nodata,w=w,max_threshold=max_threshold, scale_factor=scale_factor)
+                        for w in gen_block_windows(src, progress=progressbar)
+                    ]
+            else:
+                windows = [window for window in gen_block_windows(src)]
+
+                # We cannot write to the same file from multiple threads
+                # without causing race conditions. To safely read/write
+                # from multiple threads, we use a lock to protect the
+                # DatasetReader/Writer
+                read_lock = threading.Lock()
+                write_lock = threading.Lock()
+
+                def process(window):
+                    with read_lock:
+                        src_array = src.read(window=window)
+
+                    # The computation can be performed concurrently
+                    result = scale_and_convert(src_array, nodata=nodata, max_threshold=max_threshold, scale_factor=scale_factor, dtype=dtype)
+                    with write_lock:
+                        dst.write(result, window=window)
+                # We map the process() function over the list of
+                # windows.
+                with tqdm.tqdm(windows,total=len(windows), desc=f'Preprocessing {src_path}') as pbar:
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=4 ) as executor:
+                        for __ in executor.map(process, windows):
+                            pbar.update()
+            dst.scales = (scale_factor,)
+
+    os.remove(src_path)
+    os.rename(dst_path, src_path)
+
+
+
+def gen_blocks(blockxsize=None, blockysize=None, width=None, height=None ):
+    """
+    Generate reading block for gdal ReadAsArray
+    """
+    wi = list(range(0, width, blockxsize))
+    if width % blockxsize != 0:
+        wi += [width]
+    hi = list(range(0, height, blockysize))
+    if height % blockysize != 0:
+        hi += [height]
+    nblocks = len(wi) * len(hi)
+    m = 0
+    for col_start, col_end in zip(wi[:-1], wi[1:]):
+        col_size = col_end - col_start
+        for row_start, row_end in zip(hi[:-1], hi[1:]):
+            m+=1
+            #n = m/nblocks*100
+            row_size = row_end - row_start
+            yield col_start, row_start, col_size, row_size
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 def warp_cog(
         src_path=None, dst_path=None,
         timeout_event=None,description=None,
@@ -96,173 +242,61 @@ def warp_cog(
         raise Exception('\n'.join(errors))
     return dst_path
 
-# def translate_cog(
-#         src_path=None, dst_path=None,
-#         timeout_event=None,description=None,
-#         lonmin=-179.9999, latmin=-65, lonmax=179.9999, latmax=75
-#
-#     ):
-#
-#     set_metadata(src_path=src_path, dst_path=dst_path, description=description)
-#
-#     logger.info(f'running gdal_translate on {src_path}')
-#     progressbar = tqdm.tqdm(range(0, 100), desc=f'Creating COG {dst_path}', unit_scale=True)
-#
-#     print(lonmin, latmin, lonmax, latmax)
-#     xmin, ymin, xmax, ymax = tranform_bbox(lonmin=lonmin,lonmax=lonmax, latmin=latmin, latmax=latmax)
-#     print(xmin, ymin, xmax, ymax)
-#     cog_ds = gdal.Translate(
-#         destName=dst_path,
-#         srcDS=src_path,
-#         format='COG',
-#         creationOptions=[
-#
-#             "BLOCKSIZE=256",
-#             "OVERVIEWS=IGNORE_EXISTING",
-#             "COMPRESS=ZSTD",
-#             "LEVEL=9",
-#             "PREDICTOR=YES",
-#             "OVERVIEW_RESAMPLING=NEAREST",
-#             "BIGTIFF=IF_SAFER",
-#             "TARGET_SRS=EPSG:3857",
-#             #"RES=500",
-#             #f"EXTENT={xmin},{ymin},{xmax},{ymax}"
-#             "RESAMPLING=NEAREST",
-#             # "STATISTICS=YES",
-#             "ADD_ALPHA=NO",
-#             #"COPY_SRC_MDD=YES"
-#
-#         ],
-#         stats=True,
-#         xRes= 0.00449,
-#         yRes= 0.00449,
-#         projWin=(lonmin, latmax, lonmax, latmin),
-#         projWinSRS='EPSG:4326',
-#         callback=gdal_callback,
-#         callback_data=(timeout_event, progressbar)
-#     )
-#     del cog_ds
-#     warnings, errors, details = validate(dst_path, full_check=True)
-#     if warnings:
-#         for wm in warnings:
-#             logger.warning(wm)
-#     if errors:
-#         for em in errors:
-#             logger.error(em)
-#         raise Exception('\n'.join(errors))
-#     return dst_path
+def translate_cog(
+        src_path=None, dst_path=None,
+        timeout_event=None,description=None,
+        lonmin=-179.9999, latmin=-65, lonmax=179.9999, latmax=75
 
-#
-# def tiff2cog(src_path=None, dst_path=None, timeout_event=None, use_translate=True, description=None,
-#              lonmin=-180, latmin=-65, lonmax=180, latmax=75):
-#     """
-#     Convert a GeoTIFF to COG
-#
-#     :param src_path: str, input GeoTIDF path
-#     :param dst_path: str, output COG path
-#     :param timeout_event:
-#     :param use_translate:
-#     :return:
-#     """
-#
-#     logger.info(f'Converting {src_path} to COG')
-#     if os.path.exists(dst_path):os.remove(dst_path)
-#     logger.info(f'Setting custom metadata ')
-#     ctime = datetime.datetime.fromtimestamp(os.path.getctime(src_path)).strftime('%Y%m%d%H%M%S')
-#     src_cog_ds = gdal.OpenEx(src_path, gdal.OF_UPDATE, )
-#     band = src_cog_ds.GetRasterBand(1)
-#     # COGS do not like to be edited. So adding metadata will BREAK them
-#     src_cog_ds.SetMetadata({f'DNB_FILE_SIZE_{ctime}': f'{os.path.getsize(src_path)}'})
-#     band.SetMetadata({'DESCRIPTION': description})
-#     del src_cog_ds
-#     if use_translate:
-#         logger.info(f'running gdal_translate on {src_path}')
-#         progressbar = tqdm.tqdm(range(0, 100), desc=f'Creating COG {dst_path}', unit_scale=True)
-#         gdal.TranslateOptions()
-#         cog_ds = gdal.Translate(
-#             destName=dst_path,
-#             srcDS=src_path,
-#             format='COG',
-#             creationOptions=[
-#
-#                 "BLOCKSIZE=256",
-#                 "OVERVIEWS=IGNORE_EXISTING",
-#                 "COMPRESS=ZSTD",
-#                 "LEVEL=9",
-#                 "PREDICTOR=YES",
-#                 "OVERVIEW_RESAMPLING=NEAREST",
-#                 "BIGTIFF=IF_SAFER",
-#                 "TARGET_SRS=EPSG:3857",
-#                 # "RES=500",
-#                 # f"EXTENT={lonmin},{latmin},{lonmax},{latmax}"
-#                 "RESAMPLING=NEAREST",
-#                 #"STATISTICS=YES",
-#                 "ADD_ALPHA=NO",
-#                 "COPY_SRC_MDD=YES"
-#
-#             ],
-#             stats=True,
-#             # xRes=500,
-#             # yRes=500,
-#             projWin=(lonmin, latmax, lonmax, latmin),
-#             projWinSRS='EPSG:4326',
-#             callback=gdal_callback,
-#             callback_data=(timeout_event, progressbar)
-#         )
-#     else:
-#
-#
-#
-#         logger.info(f'running gdalwarp on {src_path}')
-#         progressbar = tqdm.tqdm(range(0, 100), desc=f'Creating COG {dst_path}', unit_scale=True)
-#
-#         wo = gdal.WarpOptions(
-#             format='COG',
-#             srcSRS='EPSG:4326',
-#             dstSRS='EPSG:3857',
-#             overviewLevel=None,
-#             multithread=True,
-#             outputBounds=[lonmin, latmin, lonmax, latmax],  # <xmin> <ymin> <xmax> <ymax>
-#             outputBoundsSRS='EPSG:4326',
-#             resampleAlg='NEAREST',
-#             targetAlignedPixels=True,
-#             xRes=500,
-#             yRes=500,
-#             creationOptions=[
-#                 "BLOCKSIZE=256",
-#                 "OVERVIEWS=IGNORE_EXISTING",
-#                 "COMPRESS=ZSTD",
-#                 "LEVEL=9",
-#                 "PREDICTOR=YES",
-#                 "OVERVIEW_RESAMPLING=NEAREST",
-#                 "BIGTIFF=IF_SAFER",
-#                 "NUM_THREADS=ALL_CPUS",
-#                 "ADD_ALPHA=NO",
-#
-#
-#             ],
-#             copyMetadata=True,
-#             callback=gdal_callback,
-#             callback_data=(timeout_event, progressbar)
-#         )
-#         cog_ds = gdal.Warp(
-#             srcDSOrSrcDSTab=src_path,
-#             destNameOrDestDS=dst_path,
-#             options=wo,
-#         )
-#
-#     #TODO ADD LandSea mask
-#
-#     del cog_ds
-#     warnings, errors, details = validate(dst_path, full_check=True)
-#     if warnings:
-#         for wm in warnings:
-#             logger.warning(wm)
-#     if errors:
-#         for em in errors:
-#             logger.error(em)
-#         raise Exception('\n'.join(errors))
-#     return dst_path
+    ):
+
+    set_metadata(src_path=src_path, dst_path=dst_path, description=description)
+
+    logger.info(f'running gdal_translate on {src_path}')
+    progressbar = tqdm.tqdm(range(0, 100), desc=f'Creating COG {dst_path}', unit_scale=True)
+
+    xmin, ymin, xmax, ymax = transform_bbox(lonmin=lonmin,lonmax=lonmax, latmin=latmin, latmax=latmax)
+
+    cog_ds = gdal.Translate(
+        destName=dst_path,
+        srcDS=src_path,
+        format='COG',
+        creationOptions=[
+
+            "BLOCKSIZE=256",
+            "OVERVIEWS=IGNORE_EXISTING",
+            "COMPRESS=ZSTD",
+            "LEVEL=9",
+            "PREDICTOR=YES",
+            "OVERVIEW_RESAMPLING=NEAREST",
+            "BIGTIFF=IF_SAFER",
+            "TARGET_SRS=EPSG:3857",
+            #"RES=500",
+            #f"EXTENT={xmin},{ymin},{xmax},{ymax}"
+            "RESAMPLING=NEAREST",
+            # "STATISTICS=YES",
+            "ADD_ALPHA=NO",
+            #"COPY_SRC_MDD=YES"
+
+        ],
+        stats=True,
+        xRes= 0.00449,
+        yRes= 0.00449,
+        projWin=(lonmin, latmax, lonmax, latmin),
+        projWinSRS='EPSG:4326',
+        callback=gdal_callback,
+        callback_data=(timeout_event, progressbar)
+    )
+    del cog_ds
+    warnings, errors, details = validate(dst_path, full_check=True)
+    if warnings:
+        for wm in warnings:
+            logger.warning(wm)
+    if errors:
+        for em in errors:
+            logger.error(em)
+        raise Exception('\n'.join(errors))
+    return dst_path
+
 
 async def process_nighttime_data(date: datetime.date = None,
                                  file_type=DNB_FILE_TYPES.DNB,
@@ -313,7 +347,7 @@ async def process_nighttime_data(date: datetime.date = None,
             will_download=should_download(blob_name=cog_dnb_blob_path,remote_file_url=remote_dnb_file)
         if will_download:
             logger.info(f'Processing nighttime lights from Colorado EOG for {date}')
-            ################### downlaod from remote  ########################
+            ################### download from remote  ########################
             download_futures = list()
             for dnb_file_type, remote in remote_dnb_files.items():
                 dnb_file_url, fdesc = remote
@@ -351,8 +385,9 @@ async def process_nighttime_data(date: datetime.date = None,
                 if m:
                     raise Exception('\n'.join(m))
 
-
-
+            ################### preprocess DNB ########################
+            down_dnb_file = downloaded_dnb_files[file_type.value]
+            preprocess_dnb(src_path=down_dnb_file)
             ################### convert to COG ########################
             if concurrent:
                 convert2cogtasks = list()
@@ -423,8 +458,6 @@ async def process_nighttime_data(date: datetime.date = None,
             ################### update stac ########################
 
             bbox, footprint = get_bbox_and_footprint(raster_path=local_cog_files[file_type.value])
-            print(bbox)
-            print(lonmin,latmin,lonmax, latmax)
             update_undp_stac(daily_dnb_blob_path=cog_dnb_blob_path,
                              daily_dnb_cloudmask_blob_path=daily_dnb_cloudmask_blob_path,
                              file_type=file_type.value,
@@ -460,3 +493,5 @@ def process_historical_nighttime_data(start_date: datetime.datetime, end_date: d
     for date in range((end_date - start_date).days):
         process_nighttime_data(start_date + datetime.timedelta(days=date))
 
+
+start = datetime.datetime.now()

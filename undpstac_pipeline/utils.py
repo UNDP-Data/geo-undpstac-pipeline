@@ -93,19 +93,20 @@ def generate_id(name=None, pad_length=None):
 
 def extract_date_from_dnbfile(dnb_file_name=None):
     item_acquisition_date_str = dnb_file_name.split('_')[2].split('.')[0][1:]
-    item_date = datetime.datetime.strptime(item_acquisition_date_str, '%Y%m%d').astimezone(timezone.utc)
-    return item_date
+    item_date = datetime.datetime.strptime(item_acquisition_date_str, '%Y%m%d').date()
+    item_datetime = datetime.datetime(item_date.year, item_date.month, item_date.day,
+                                      tzinfo=timezone.utc)
+    return item_datetime
 
 
-def tranform_bbox(lonmin=None, latmin=None, lonmax=None, latmax=None):
+def transform_bbox(lonmin=None, latmin=None, lonmax=None, latmax=None):
     src_srs = osr.SpatialReference()
     src_srs.ImportFromEPSG(4326)
     dst_srs = osr.SpatialReference()
     dst_srs.ImportFromEPSG(3857)
     ct = osr.CoordinateTransformation(src_srs, dst_srs)
-    ymin, xmin, _ = [round(e, 2) for e in ct.TransformPoint(lonmin, latmin)]
-    ymax, xmax, _ = [round(e, 2) for e in ct.TransformPoint(lonmax, latmax)]
-    return xmin, ymin,xmax, ymax
+    ymin, xmin, ymax, xmax = ct.TransformBounds(lonmin, latmin, lonmax, latmax, 21)
+    return xmin, ymin, xmax, ymax
 
 def get_bbox_and_footprint(raster_path=None):
     ds = gdal.OpenEx(raster_path, gdal.OF_RASTER )

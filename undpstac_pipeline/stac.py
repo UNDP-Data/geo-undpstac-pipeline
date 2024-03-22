@@ -34,10 +34,7 @@ def item_f(item:pystac.Item=None, parent_dir = None)->str:
 
 def to_set(self):
     return set(itertools.chain(*self.intervals))
-def as_timeranges(self):
-    return [TimeRange(*e) for e in self.intervals].pop()
-pystac.TemporalExtent.to_set = to_set
-pystac.TemporalExtent.as_timeranges = as_timeranges
+
 
 class AzureStacIO(stac_io.StacIO):
     # container_client = get_blob_service_client()
@@ -88,29 +85,6 @@ def create_stac_catalog(
     return catalog
 
 
-def create_stac_item(item_path=None):
-
-    bbox, footprint = get_bbox_and_footprint(raster_path=item_path)
-    _, item_name = os.path.split(item_path)
-    item_date = u.extract_date_from_dnbfile(item_name)
-
-    item = pystac.Item(id=u.generate_id(name=item_path),
-                       geometry=footprint,
-                       bbox=bbox,
-                       datetime=item_date,
-                       properties={}
-                       )
-    item.add_asset(
-        key='DNB',
-        asset=pystac.Asset(
-            href=item_path,
-            media_type=pystac.MediaType.COG,
-            title='VIIRS DNB mosaic from Colorado schools of Mines'
-        )
-    )
-
-    return item
-
 def create_dnb_stac_item(
                         item_id=None,
                         daily_dnb_blob_path=None,
@@ -139,6 +113,7 @@ def create_dnb_stac_item(
                         datetime=item_date,
                         properties={},
                         stac_extensions=['eo', 'proj'] if add_eo_extension else ['proj']
+
                        )
     item.ext.add('proj')
     item.ext.proj.epsg = 3857
@@ -278,7 +253,7 @@ def update_undp_stac(
                 parent = nighttime_collection.get_child(parent_id, recursive=True)
                 parent.add_child(time_path_catalog)
 
-    root_catalog.normalize_hrefs(root_href=az_stacio.container_client.url,strategy=CustomLayoutStrategy(catalog_func=catalog_f))
+
 
 
     # dnb_year_catalog_blob_path = os.path.join(collection_folder, year, const.STAC_CATALOG_NAME)
@@ -308,20 +283,14 @@ def update_undp_stac(
         footprint=footprint
     )
 
-    items = time_path_catalog.get_items(item_id,recursive=True)
+    items = time_path_catalog.get_items(item_id,recursive=False)
     for item in items:
         if item.id == daily_dnb_item.id:
+            logger.info(f'updating item id {item.id}')
             time_path_catalog.remove_item(item_id=item.id)
     time_path_catalog.add_item(daily_dnb_item)
 
-
-
-
-    root_catalog.normalize_hrefs(root_href=az_stacio.container_client.url,
-                                 strategy=CustomLayoutStrategy(catalog_func=catalog_f, item_func=item_f))
     item_datetime = daily_dnb_item.datetime
-
-
     temporal_extent = nighttime_collection.extent.temporal
 
 
@@ -330,7 +299,11 @@ def update_undp_stac(
         nighttime_collection.extent.temporal = temporal_extent
     else:
         update_temporal_extent(item_datetime=item_datetime, temporal_extent=temporal_extent)
+    root_catalog.normalize_hrefs(root_href=az_stacio.container_client.url,
+                                 strategy=CustomLayoutStrategy(catalog_func=catalog_f, item_func=item_f))
+
     logger.info('Saving STAC structure to Azure')
+    root_catalog.make_all_asset_hrefs_relative()
     root_catalog.save(stac_io=az_stacio)
 
 
