@@ -387,11 +387,7 @@ async def process_nighttime_data(date: datetime.date = None,
 
             ################### preprocess DNB ########################
             down_dnb_file = downloaded_dnb_files[file_type.value]
-
             preprocess_dnb(src_path=down_dnb_file)
-
-
-
             ################### convert to COG ########################
             if concurrent:
                 convert2cogtasks = list()

@@ -93,8 +93,10 @@ def generate_id(name=None, pad_length=None):
 
 def extract_date_from_dnbfile(dnb_file_name=None):
     item_acquisition_date_str = dnb_file_name.split('_')[2].split('.')[0][1:]
-    item_date = datetime.datetime.strptime(item_acquisition_date_str, '%Y%m%d').astimezone(timezone.utc)
-    return item_date
+    item_date = datetime.datetime.strptime(item_acquisition_date_str, '%Y%m%d').date()
+    item_datetime = datetime.datetime(item_date.year, item_date.month, item_date.day,
+                                      tzinfo=timezone.utc)
+    return item_datetime
 
 
 def transform_bbox(lonmin=None, latmin=None, lonmax=None, latmax=None):
