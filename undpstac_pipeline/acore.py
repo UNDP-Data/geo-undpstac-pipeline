@@ -22,8 +22,12 @@ from rasterio import warp
 from rasterio.crs import CRS
 from rasterio.enums import Resampling
 from rio_cogeo.profiles import cog_profiles
+from rio_cogeo import cog_validate
 from rasterio.vrt import WarpedVRT
+from rasterio.windows import Window
 import json
+import pyproj
+import math
 gdal.UseExceptions()
 
 logger = logging.getLogger(__name__)
@@ -52,7 +56,42 @@ def set_metadata(src_path=None, dst_path=None, description=None):
     del src_cog_ds
     return dtp
 
+def merc_from_ll(lats, lons):
+    r_major = 6378137.000
+    x = r_major * np.radians(lons)
+    scale = x/lons
+    y = 180.0/np.pi * np.log(np.tan(np.pi/4.0 + lats * (np.pi/180.0)/2.0)) * scale
+    return x, y
+def YX2ll(Y=None, X=None, ):
 
+    geosp = pyproj.Proj("EPSG:3857")
+    lon, lat = geosp(X,Y,inverse=True)
+
+    lat = np.where(lat==1e30,np.nan, lat)
+    lon = np.where(lon==1e30,np.nan, lon)
+    return lat, lon
+
+def ll2YX(lat=None, lon=None):
+    """
+    COnverts lat, lon coordinates to GEOS(ssp) projection using Proj4 library
+
+    :param lat: number or numpy array, input latitude,
+    :param lon:, number or numpy array, input longitude
+    :param ssp: number, float, sub-satellite point
+    :return:
+    """
+
+
+    geosp = pyproj.Proj("EPSG:3857")
+    try: # fix the bug in Proj4 that Tomas run into. The bug is related to not
+        shp=lon.shape
+        X, Y = geosp(list(lon.flatten()), list(lat.flatten()))
+        X = np.array(X).reshape(shp)
+        Y = np.array(Y).reshape(shp)
+        return Y, X
+    except AttributeError:
+        X, Y = geosp(lon, lat)
+        return Y,X
 
 
 def scale_and_convert(src_arr=None, src_win=None, nodata=None, max_threshold=None, scale_factor=None, dtype=None ):
@@ -65,21 +104,52 @@ def scale_and_convert(src_arr=None, src_win=None, nodata=None, max_threshold=Non
     out_arr[pos] = max_threshold
     neg = out_arr < 0
     out_arr[neg] = nodata
-
     return out_arr
 
-def scale_and_io(src=None, dst=None, w=None, nodata=None, max_threshold=None, scale_factor=None, dtype=None ):
+
+import numpy as np
+def scale_and_io(src=None, dst=None, dst_cog=None, w=None, nodata=None, max_threshold=None, scale_factor=None, dtype=None
+
+                 ):
     """
     Convert float data to a different dtype
 
     """
     src_arr = src.read(1, window=w)
+    print(src_arr.shape)
     out_arr = (src_arr / scale_factor).astype(dtype)
     pos = out_arr > max_threshold
     out_arr[pos] = max_threshold
     neg = out_arr < 0
     out_arr[neg] = nodata
-    dst.write(out_arr, 1, window=w)
+    #dst.write(out_arr, 1, window=w)
+
+    cogtr = dst_cog.transform
+
+
+    target_crs = dst_cog.crs
+    window_bounds = src.window_bounds(w)
+
+    target_bounds = warp.transform_bounds(src.crs, target_crs, *window_bounds)
+    target_window = dst_cog.window(*target_bounds)
+    #src_l = np.arange(w.height, dtype='u4') + w.row_off
+    dst_l = np.arange(target_window.height, dtype='i4') + int(target_window.row_off)
+    #src_c = np.arange(w.width, dtype='u4') + w.col_off
+    dst_c = np.arange(target_window.width, dtype='i4') + int(target_window.col_off)
+    #lon,lat = src.transform * (src_c, src_l)
+    X,Y = cogtr * (dst_c[:, np.newaxis], dst_l[np.newaxis,:])
+    lats, lons = YX2ll(Y=Y, X=X)
+    print(lats.shape)
+    src_c, src_l = ~src.transform * (lons,lats)
+    src_li = (src_l - w.row_off).astype('u4')
+    src_ci = (src_c - w.col_off).astype('u4')
+    cog_arr = out_arr[src_li, src_ci]
+    #dst_cog.write(cog_arr, 1, target_window)
+    print(w)
+
+
+
+
 
 def gen_block_windows(ds=None, factor=10, progress=None):
     """
@@ -102,7 +172,7 @@ def gen_block_windows(ds=None, factor=10, progress=None):
                 progress.update(n=inc)
             width = bx if (window.col_off + bx) < ds.width else ds.width - window.col_off
             height = by if (window.row_off + by) < ds.height else ds.height - window.row_off
-            if m>(total_blocks/4):return
+            #if m>(total_blocks/4):return
             yield  Window(col_off=window.col_off , row_off=window.row_off, width=width, height=height)
 
 
@@ -189,7 +259,7 @@ def compute_indices(src=None, src_win=None, dst_transform=None):
 
 
 def reproject(src_path=None, dst_path=None, description=None,
-            scale_factor=0.01, dtype='uint16',
+            scale_factor=0.01, dtype='uint16', res=500,
               lonmin=-180, latmin=-65, lonmax=178, latmax=75):
 
     assert dtypes.check_dtype(dtype), f'Invalid dtype={dtype}. Valid values are {dtypes.dtype_ranges.keys()}'
@@ -198,35 +268,78 @@ def reproject(src_path=None, dst_path=None, description=None,
     max_threshold = nodata-1
     dst_path = os.path.splitext(src_path)[0]
     dst_path = f'{dst_path}i.tif'
-    with rasterio.open(src_path) as src:
-        dst_profile = src.profile
-        dst_profile.update(dict(dtype=dtype), nodata=nodata)
-        with rasterio.open(dst_path, 'w', **dst_profile) as dst:
-            windows = [window for window in gen_block_windows(src)]
+    cog_profile = dict(
+        PREDICTOR='YES',
+        OVERVIEWS='IGNORE_EXISTING',
+        LEVEL='9',
+        BLOCKSIZE='256',
+        COMPRESS='ZSTD',
+        OVERVIEW_RESAMPLING='NEAREST',
+        BIGTIFF='IF_SAFER',
+        ADD_ALPHA='NO',
+        BIG_TIFF="IF_SAFER"
 
-            # We cannot write to the same file from multiple threads
-            # without causing race conditions. To safely read/write
-            # from multiple threads, we use a lock to protect the
-            # DatasetReader/Writer
-            read_lock = threading.Lock()
-            write_lock = threading.Lock()
 
-            def process(window):
-                with read_lock:
-                    src_array = src.read(window=window)
+    )
 
-                # The computation can be performed concurrently
-                result = scale_and_convert(src_array, nodata=nodata, max_threshold=max_threshold, scale_factor=scale_factor, dtype=dtype)
-                with write_lock:
-                    dst.write(result, window=window)
-            # We map the process() function over the list of
-            # windows.
-            with tqdm.tqdm(windows,total=len(windows), desc=f'Preprocessing {src_path}') as pbar:
-                with concurrent.futures.ThreadPoolExecutor(max_workers=4 ) as executor:
-                    for __ in executor.map(process, windows):
-                        pbar.update()
-            dst.scales = (scale_factor,)
 
+
+    dst_crs = CRS.from_epsg(3857)
+    src_crs = CRS.from_epsg(4326)
+
+    dst_bounds = warp.transform_bounds(src_crs, dst_crs, lonmin, latmin, lonmax, latmax)
+    left, bottom, right, top = dst_bounds
+    dst_transform = Affine(res, 0.0, left,
+                           0.0, -res, top)
+
+    dst_transform, dst_height, dst_width, = warp.aligned_target(transform=dst_transform, width=86401, height=33601,
+                                                                resolution=res)
+
+
+    cog_profile  = {
+        'resampling': 'nearest',
+        'overview_resampling': 'nearest',
+        'driver': 'COG',
+        'dtype': dtype,
+        'count': 1,
+        'width': dst_width,
+        'height': dst_height,
+        'crs': dst_crs,
+        'transform': dst_transform,
+        'TILED':'YES',
+        'interleave': 'band',  # Band interleaving
+        'compress': 'zstd',  # Compression method
+        'zstd_level': 9,  # Compression level for zstd
+        'BLOCKSIZE': 256,
+        'nodata':nodata,
+        'BIGTIFF' : 'IF_SAFER',
+        'ADD_ALPHA':'NO',
+
+    }
+
+
+    with (rasterio.open(dst_path, 'w', **cog_profile)) as dst:
+        print(dst.profile)
+        exit()
+        with tqdm.tqdm(total=100., desc=f'Creating COG {dst_path}') as progressbar:
+            windows = [w for w in gen_block_windows(dst, progress=progressbar)]
+
+            for w in windows[::1]:
+                data = np.empty(shape=(w.height, w.width), dtype='u2')
+                data[:] = np.random.randint(0, max_threshold, dtype=dtype).item()
+                dst.write(data,window=w)
+        dst.scales = (scale_factor,)
+        factors = [2, 4, 8, 16, 32]  # You can adjust these factors as needed
+        dst.build_overviews(factors, Resampling.nearest)
+
+    # warnings, errors, details = validate(dst_path, full_check=True)
+    # if warnings:
+    #     for wm in warnings:
+    #         logger.warning(wm)
+    # if errors:
+    #     for em in errors:
+    #         logger.error(em)
+    #     raise Exception('\n'.join(errors))
 
 def reproject1(src_path=None, dst_path=None, description=None,
             scale_factor=0.01, dtype='uint16',
