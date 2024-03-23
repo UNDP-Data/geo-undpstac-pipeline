@@ -3,6 +3,7 @@ import asyncio
 import threading
 import concurrent
 import rasterio
+from affine import Affine
 from rasterio.windows import Window
 from rasterio import dtypes
 from undpstac_pipeline.utils import should_download, get_bbox_and_footprint,transform_bbox
@@ -16,7 +17,13 @@ from osgeo import gdal
 from undpstac_pipeline.validate import validate
 from undpstac_pipeline.azblob import upload
 from undpstac_pipeline.stac import update_undp_stac
-
+from rasterio.shutil import copy
+from rasterio import warp
+from rasterio.crs import CRS
+from rasterio.enums import Resampling
+from rio_cogeo.profiles import cog_profiles
+from rasterio.vrt import WarpedVRT
+import json
 gdal.UseExceptions()
 
 logger = logging.getLogger(__name__)
@@ -48,7 +55,7 @@ def set_metadata(src_path=None, dst_path=None, description=None):
 
 
 
-def scale_and_convert(src_arr=None, nodata=None, max_threshold=None, scale_factor=None, dtype=None ):
+def scale_and_convert(src_arr=None, src_win=None, nodata=None, max_threshold=None, scale_factor=None, dtype=None ):
     """
     Convert float data to a different dtype
 
@@ -95,7 +102,7 @@ def gen_block_windows(ds=None, factor=10, progress=None):
                 progress.update(n=inc)
             width = bx if (window.col_off + bx) < ds.width else ds.width - window.col_off
             height = by if (window.row_off + by) < ds.height else ds.height - window.row_off
-            #if m>(total_blocks/4):return
+            if m>(total_blocks/4):return
             yield  Window(col_off=window.col_off , row_off=window.row_off, width=width, height=height)
 
 
@@ -105,12 +112,11 @@ def preprocess_dnb(src_path=None, scale_factor=0.01, dtype='uint16', parallel=Tr
     minr, maxr = dtypes.dtype_ranges[dtype]
     nodata = maxr-35
     max_threshold = nodata-1
-    dst_path = f'{src_path}i'
+    #dst_path = f'{src_path}i'
+    dst_path = os.path.splitext(src_path)[0]
     with rasterio.open(src_path) as src:
         dst_profile = src.profile
         dst_profile.update(dict(dtype=dtype), nodata=nodata)
-
-
         with rasterio.open(dst_path, 'w', **dst_profile) as dst:
 
             if not parallel:
@@ -145,6 +151,7 @@ def preprocess_dnb(src_path=None, scale_factor=0.01, dtype='uint16', parallel=Tr
                             pbar.update()
             dst.scales = (scale_factor,)
 
+
     os.remove(src_path)
     os.rename(dst_path, src_path)
 
@@ -170,21 +177,179 @@ def gen_blocks(blockxsize=None, blockysize=None, width=None, height=None ):
             row_size = row_end - row_start
             yield col_start, row_start, col_size, row_size
 
+def compute_indices(src=None, src_win=None, dst_transform=None):
+
+    target_crs = CRS.from_epsg(3857)
+    # Transform the source coordinates to the target CRS
+    dst_bounds = warp.transform_bounds(src.crs, target_crs,*src.bounds)
+
+    # target_transform = rasterio.transform.from_origin(target_extent[0], target_extent[3], pixel_width, pixel_height)
+    # target_indices = ~target_transform * dst_bounds
 
 
 
+def reproject(src_path=None, dst_path=None, description=None,
+            scale_factor=0.01, dtype='uint16',
+              lonmin=-180, latmin=-65, lonmax=178, latmax=75):
+
+    assert dtypes.check_dtype(dtype), f'Invalid dtype={dtype}. Valid values are {dtypes.dtype_ranges.keys()}'
+    minr, maxr = dtypes.dtype_ranges[dtype]
+    nodata = maxr-35
+    max_threshold = nodata-1
+    dst_path = os.path.splitext(src_path)[0]
+    dst_path = f'{dst_path}i.tif'
+    with rasterio.open(src_path) as src:
+        dst_profile = src.profile
+        dst_profile.update(dict(dtype=dtype), nodata=nodata)
+        with rasterio.open(dst_path, 'w', **dst_profile) as dst:
+            windows = [window for window in gen_block_windows(src)]
+
+            # We cannot write to the same file from multiple threads
+            # without causing race conditions. To safely read/write
+            # from multiple threads, we use a lock to protect the
+            # DatasetReader/Writer
+            read_lock = threading.Lock()
+            write_lock = threading.Lock()
+
+            def process(window):
+                with read_lock:
+                    src_array = src.read(window=window)
+
+                # The computation can be performed concurrently
+                result = scale_and_convert(src_array, nodata=nodata, max_threshold=max_threshold, scale_factor=scale_factor, dtype=dtype)
+                with write_lock:
+                    dst.write(result, window=window)
+            # We map the process() function over the list of
+            # windows.
+            with tqdm.tqdm(windows,total=len(windows), desc=f'Preprocessing {src_path}') as pbar:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=4 ) as executor:
+                    for __ in executor.map(process, windows):
+                        pbar.update()
+            dst.scales = (scale_factor,)
+
+
+def reproject1(src_path=None, dst_path=None, description=None,
+            scale_factor=0.01, dtype='uint16',
+              lonmin=-180, latmin=-65, lonmax=178, latmax=75):
+
+    logger.info(f'running  rio-cogeo on {src_path}')
+    config = dict()
+    config.update(
+        {
+            "GDAL_NUM_THREADS": 4,
+
+        }
+    )
+
+    output_profile = cog_profiles.get('zstd')
+    output_profile.update({"BIGTIFF": os.environ.get("BIGTIFF", "IF_SAFER")})
+
+    cog_options = dict(
+        RES='500',
+        PREDICTOR='YES',
+        OVERVIEWS='IGNORE_EXISTING',
+        LEVEL='9',
+        BLOCKSIZE='256',
+        COMPRESS='ZSTD',
+        OVERVIEW_RESAMPLING='NEAREST',
+        BIGTIFF='IF_SAFER',
+        ADD_ALPHA='NO'
+
+
+    )
+
+    ctime = datetime.datetime.fromtimestamp(os.path.getctime(src_path)).strftime('%Y%m%d%H%M%S')
+    metadata = {f'DNB_FILE_SIZE_{ctime}': f'{os.path.getsize(src_path)}', 'DESCRIPTION':description}
+
+    assert dtypes.check_dtype(dtype), f'Invalid dtype={dtype}. Valid values are {dtypes.dtype_ranges.keys()}'
+    minr, maxr = dtypes.dtype_ranges[dtype]
+    nodata = maxr-35
+    max_threshold = nodata-1
+    #dst_path = f'{src_path}i'
+    dst_path = os.path.splitext(src_path)[0]
+    dst_path  = f'{dst_path}i.tif'
+    print(dst_path)
+    with rasterio.open(src_path) as src:
+        dst_profile = src.profile.copy()
+        dst_profile.update(dict(dtype=dtype), nodata=nodata)
+        w, h = src.shape
+
+
+        dst_crs = CRS.from_epsg(3857)
+        res = 500
+        dst_bounds = warp.transform_bounds(src.crs, dst_crs,*src.bounds)
+        left, bottom, right, top = dst_bounds
+        dst_transform = Affine(res, 0.0, left,
+                                      0.0, -res, top)
+
+        dst_transform, dst_height, dst_width,  = warp.aligned_target(transform=dst_transform,width=w, height=h, resolution=res)
+        compute_indices(src=src)
+
+
+        vrt_options = {
+            'resampling': Resampling.nearest,
+            'crs': dst_crs,
+            'transform': dst_transform,
+            'height': dst_height,
+            'width': dst_width,
+            'blockxsize': 256,
+            'blockysize': 256
+
+        }
+        cog_options.update({
+            'resampling': Resampling.nearest,
+            'crs': dst_crs,
+            'transform': dst_transform,
+            'height': dst_height,
+            'width': dst_width,
+            'driver':'COG',
+            'dtype':dtype,
+            'count':1,
+            'blockxsize': 256,
+            'blockysize': 256,
+            'tiled':True
+
+        })
+
+        with rasterio.open(dst_path, 'w', **dst_profile) as dst:
+
+            windows = [window for window in gen_block_windows(src)]
+
+
+            # We cannot write to the same file from multiple threads
+            # without causing race conditions. To safely read/write
+            # from multiple threads, we use a lock to protect the
+            # DatasetReader/Writer
+            read_lock = threading.Lock()
+            write_lock = threading.Lock()
+
+            def process(window):
+                with read_lock:
+                    src_array = src.read(window=window)
+
+                # The computation can be performed concurrently
+                result = scale_and_convert(src_array, nodata=nodata, max_threshold=max_threshold, scale_factor=scale_factor, dtype=dtype)
+                with write_lock:
+                    dst.write(result, window=window)
+            # We map the process() function over the list of
+            # windows.
+            with tqdm.tqdm(windows,total=len(windows), desc=f'Preprocessing {src_path}') as pbar:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=4 ) as executor:
+                    for __ in executor.map(process, windows):
+                        pbar.update()
+            dst.scales = (scale_factor,)
 
 
 
-
-
-
-
-
-
-
-
-
+    # warnings, errors, details = validate(dst_path, full_check=True)
+    # if warnings:
+    #     for wm in warnings:
+    #         logger.warning(wm)
+    # if errors:
+    #     for em in errors:
+    #         logger.error(em)
+    #     raise Exception('\n'.join(errors))
+    # return dst_path
 
 def warp_cog(
         src_path=None, dst_path=None,
@@ -387,8 +552,11 @@ async def process_nighttime_data(date: datetime.date = None,
                     raise Exception('\n'.join(m))
 
             ################### preprocess DNB ########################
-            down_dnb_file = downloaded_dnb_files[file_type.value]
-            preprocess_dnb(src_path=down_dnb_file)
+            #down_dnb_file = downloaded_dnb_files[file_type.value]
+
+
+            #preprocess_dnb(src_path=down_dnb_file)
+
             ################### convert to COG ########################
             if concurrent:
                 convert2cogtasks = list()
@@ -438,12 +606,18 @@ async def process_nighttime_data(date: datetime.date = None,
                 for dnb_file_type, downloaded_dnb_file in downloaded_dnb_files.items():
                     local_cog_file = os.path.splitext(downloaded_dnb_file)[0]
                     _, dnb_file_desc = remote_dnb_files[dnb_file_type]
-                    converted_cog_path = warp_cog(
-                        src_path = downloaded_dnb_file,
-                        dst_path = local_cog_file,
-                        timeout_event = timeout_event,
-                        description = dnb_file_desc,
-                        lonmin = lonmin, latmin = latmin, lonmax = lonmax, latmax = latmax
+                    # converted_cog_path = warp_cog(
+                    #     src_path = downloaded_dnb_file,
+                    #     dst_path = local_cog_file,
+                    #     timeout_event = timeout_event,
+                    #     description = dnb_file_desc,
+                    #     lonmin = lonmin, latmin = latmin, lonmax = lonmax, latmax = latmax
+                    # )
+                    converted_cog_path = reproject(
+                        src_path=downloaded_dnb_file,
+                        dst_path=local_cog_file,
+                        description=dnb_file_desc,
+                        lonmin=lonmin, latmin=latmin, lonmax=lonmax, latmax=latmax
                     )
                     local_cog_files[dnb_file_type] = converted_cog_path
 
@@ -451,20 +625,20 @@ async def process_nighttime_data(date: datetime.date = None,
             for dnb_file_type, local_cog_file in local_cog_files.items():
                 cog_blob_pth = azure_dnb_cogs[dnb_file_type]
                 logger.info(f'Uploading {dnb_file_type} from {local_cog_file} to {cog_blob_pth}')
-                upload(src_path=local_cog_file, dst_path=cog_blob_pth)
+                #upload(src_path=local_cog_file, dst_path=cog_blob_pth)
                 if 'cloud' in dnb_file_type.lower():
                     daily_dnb_cloudmask_blob_path = cog_blob_pth
 
 
             ################### update stac ########################
 
-            bbox, footprint = get_bbox_and_footprint(raster_path=local_cog_files[file_type.value])
-            update_undp_stac(daily_dnb_blob_path=cog_dnb_blob_path,
-                             daily_dnb_cloudmask_blob_path=daily_dnb_cloudmask_blob_path,
-                             file_type=file_type.value,
-                             bbox=bbox,
-                             footprint=footprint
-                             )
+            #bbox, footprint = get_bbox_and_footprint(raster_path=local_cog_files[file_type.value])
+            # update_undp_stac(daily_dnb_blob_path=cog_dnb_blob_path,
+            #                  daily_dnb_cloudmask_blob_path=daily_dnb_cloudmask_blob_path,
+            #                  file_type=file_type.value,
+            #                  bbox=bbox,
+            #                  footprint=footprint
+            #                  )
 
 
 
@@ -494,5 +668,12 @@ def process_historical_nighttime_data(start_date: datetime.datetime, end_date: d
     for date in range((end_date - start_date).days):
         process_nighttime_data(start_date + datetime.timedelta(days=date))
 
-
 start = datetime.datetime.now()
+reproject(
+    src_path='/work/tmp/ntl/SVDNB_npp_d20240125.rade9d.tif',
+    dst_path='/tmp/SVDNB_npp_d20240125.rade9d.tif',
+    description='DN mosaic',
+)
+
+end = datetime.datetime.now()
+print(f'reprojection lasted {(end-start).total_seconds()}')
