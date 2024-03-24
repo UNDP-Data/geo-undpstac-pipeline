@@ -105,7 +105,9 @@ def transform_bbox(lonmin=None, latmin=None, lonmax=None, latmax=None):
     dst_srs = osr.SpatialReference()
     dst_srs.ImportFromEPSG(3857)
     ct = osr.CoordinateTransformation(src_srs, dst_srs)
-    ymin, xmin, ymax, xmax = ct.TransformBounds(lonmin, latmin, lonmax, latmax, 21)
+    # this is because EPSG:4326 is mapping axes to data as 2,1 that is why lat is instead of lon as horiz arg args
+    # to TransformBounds
+    xmin, ymin, xmax, ymax = ct.TransformBounds( latmin, lonmin, latmax, lonmax, 21)
     return xmin, ymin, xmax, ymax
 
 def get_bbox_and_footprint(raster_path=None):
@@ -134,3 +136,11 @@ def get_bbox_and_footprint(raster_path=None):
 
 
 
+if __name__ == '__main__':
+    lonmin = -180
+    latmin = -65
+    lonmax = 180
+    latmax = 75
+    print(f'lonmin={lonmin}, latmin={latmin}, lonmax={lonmax}, latmax={latmax}')
+    xmin, ymin, xmax, ymax = transform_bbox(lonmin=lonmin, latmin=latmin, lonmax=lonmax, latmax=latmax)
+    print(f'xmin={xmin} ymin={ymin} xmax={xmax} ymax={ymax}')

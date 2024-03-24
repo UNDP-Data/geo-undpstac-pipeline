@@ -6,7 +6,7 @@ WORKDIR /app
 
 COPY . /app
 
-RUN pip3 install --no-cache-dir aiohttp shapely azure-storage-blob python-dotenv tqdm pystac aiofiles rasterio
+RUN pip3 install --no-cache-dir aiohttp shapely azure-storage-blob python-dotenv tqdm pystac aiofiles
 
 
 CMD ["python3", "-m",  "undpstac_pipeline.cli"]

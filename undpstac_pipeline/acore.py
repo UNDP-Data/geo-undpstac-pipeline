@@ -1,10 +1,6 @@
 import multiprocessing
 import asyncio
-import threading
-import concurrent
-import rasterio
-from rasterio.windows import Window
-from rasterio import dtypes
+import numpy as np
 from undpstac_pipeline.utils import should_download, get_bbox_and_footprint,transform_bbox
 from undpstac_pipeline.colorado_eog import get_dnb_files, download_file
 from undpstac_pipeline.const import DNB_FILE_TYPES, AZURE_DNB_COLLECTION_FOLDER, COG_CONVERT_TIMEOUT,AIOHTTP_READ_CHUNKSIZE, COG_DOWNLOAD_TIMEOUT
@@ -13,6 +9,7 @@ import logging
 import os
 import tqdm
 from osgeo import gdal
+from osgeo import gdal_array
 from undpstac_pipeline.validate import validate
 from undpstac_pipeline.azblob import upload
 from undpstac_pipeline.stac import update_undp_stac
@@ -21,7 +18,11 @@ gdal.UseExceptions()
 
 logger = logging.getLogger(__name__)
 
-
+def gdal_callback_pre(complete, message, data):
+    timeout_event = data
+    if timeout_event and timeout_event.is_set():
+        logger.info(f'GDAL was signalled to stop...')
+        return 0
 def gdal_callback(complete, message, data):
 
     timeout_event, progressbar = data
@@ -29,6 +30,8 @@ def gdal_callback(complete, message, data):
     if timeout_event and timeout_event.is_set():
         logger.info(f'GDAL was signalled to stop...')
         return 0
+
+
 
 
 def set_metadata(src_path=None, dst_path=None, description=None):
@@ -73,80 +76,142 @@ def scale_and_io(src=None, dst=None, w=None, nodata=None, max_threshold=None, sc
     neg = out_arr < 0
     out_arr[neg] = nodata
     dst.write(out_arr, 1, window=w)
+#
+# def gen_block_windows(ds=None, factor=10, progress=None):
+#     """
+#     Generate block windows for a rasterio dataset scaled by factor
+#     """
+#     by, bx = ds.block_shapes[0]
+#     by*=factor
+#     bx*=factor
+#     total_blocks = (ds.width // bx +1) * (ds.height // by + 1)
+#     m = 0
+#     for ji, window in ds.block_windows(1):
+#         j, i = ji
+#         jm = j % factor
+#         im = i % factor
+#         if jm == 0 and im == 0:
+#             m+=1
+#             if progress:
+#                 n = m/total_blocks*100
+#                 inc = n - progress.n
+#                 progress.update(n=inc)
+#             width = bx if (window.col_off + bx) < ds.width else ds.width - window.col_off
+#             height = by if (window.row_off + by) < ds.height else ds.height - window.row_off
+#             #if m>(total_blocks/4):return
+#             yield  Window(col_off=window.col_off , row_off=window.row_off, width=width, height=height)
+#
+#
+# def preprocess_dnb(src_path=None, scale_factor=0.01, dtype='uint16', parallel=True):
+#
+#     assert dtypes.check_dtype(dtype), f'Invalid dtype={dtype}. Valid values are {dtypes.dtype_ranges.keys()}'
+#     minr, maxr = dtypes.dtype_ranges[dtype]
+#     nodata = maxr-35
+#     max_threshold = nodata-1
+#     dst_path = f'{src_path}i'
+#     with rasterio.open(src_path) as src:
+#         dst_profile = src.profile
+#         dst_profile.update(dict(dtype=dtype), nodata=nodata)
+#
+#
+#         with rasterio.open(dst_path, 'w', **dst_profile) as dst:
+#
+#             if not parallel:
+#                 with tqdm.tqdm(total=100., desc=f'Creating COG {dst_path}') as progressbar:
+#                     [
+#                         scale_and_io(src=src,dst=dst,nodata=nodata,w=w,max_threshold=max_threshold, scale_factor=scale_factor)
+#                         for w in gen_block_windows(src, progress=progressbar)
+#                     ]
+#             else:
+#                 windows = [window for window in gen_block_windows(src)]
+#
+#                 # We cannot write to the same file from multiple threads
+#                 # without causing race conditions. To safely read/write
+#                 # from multiple threads, we use a lock to protect the
+#                 # DatasetReader/Writer
+#                 read_lock = threading.Lock()
+#                 write_lock = threading.Lock()
+#
+#                 def process(window):
+#                     with read_lock:
+#                         src_array = src.read(window=window)
+#
+#                     # The computation can be performed concurrently
+#                     result = scale_and_convert(src_array, nodata=nodata, max_threshold=max_threshold, scale_factor=scale_factor, dtype=dtype)
+#                     with write_lock:
+#                         dst.write(result, window=window)
+#                 # We map the process() function over the list of
+#                 # windows.
+#                 with tqdm.tqdm(windows,total=len(windows), desc=f'Preprocessing {src_path}') as pbar:
+#                     with concurrent.futures.ThreadPoolExecutor(max_workers=4 ) as executor:
+#                         for __ in executor.map(process, windows):
+#                             pbar.update()
+#             dst.scales = (scale_factor,)
+#
+#     os.remove(src_path)
+#     os.rename(dst_path, src_path)
 
-def gen_block_windows(ds=None, factor=10, progress=None):
+def preprocess_dnb(src_path=None, scale_factor=0.01, dtype='uint16', timeout_event=None):
     """
-    Generate block windows for a rasterio dataset scaled by factor
+    Preprocess src_path as to redcue it's size. Thsi si achieved by
+        1 - changing the dtype to uint16 from float32
+        2 - applying a scale factor = 0.01 because the original data was rounded to this precision
+
+        The dtype and scale factor contrained the nodata value to be 655 and max value to be
+        654. These are store in the processed GTIFF as 65500  respectively 65400
     """
-    by, bx = ds.block_shapes[0]
-    by*=factor
-    bx*=factor
-    total_blocks = (ds.width // bx +1) * (ds.height // by + 1)
-    m = 0
-    for ji, window in ds.block_windows(1):
-        j, i = ji
-        jm = j % factor
-        im = i % factor
-        if jm == 0 and im == 0:
-            m+=1
-            if progress:
-                n = m/total_blocks*100
-                inc = n - progress.n
-                progress.update(n=inc)
-            width = bx if (window.col_off + bx) < ds.width else ds.width - window.col_off
-            height = by if (window.row_off + by) < ds.height else ds.height - window.row_off
-            #if m>(total_blocks/4):return
-            yield  Window(col_off=window.col_off , row_off=window.row_off, width=width, height=height)
 
+    ii = np.iinfo(np.dtype(dtype))
 
-def preprocess_dnb(src_path=None, scale_factor=0.01, dtype='uint16', parallel=True):
-
-    assert dtypes.check_dtype(dtype), f'Invalid dtype={dtype}. Valid values are {dtypes.dtype_ranges.keys()}'
-    minr, maxr = dtypes.dtype_ranges[dtype]
-    nodata = maxr-35
+    nodata = ii.max-35
     max_threshold = nodata-1
+    src_ds = gdal.OpenEx(src_path, gdal.OF_READONLY|gdal.OF_RASTER)
     dst_path = f'{src_path}i'
-    with rasterio.open(src_path) as src:
-        dst_profile = src.profile
-        dst_profile.update(dict(dtype=dtype), nodata=nodata)
+    width = src_ds.RasterXSize
+    height = src_ds.RasterYSize
+    gtype = gdal_array.NumericTypeCodeToGDALTypeCode(np.dtype(dtype))
 
+    dst_ds = gdal.GetDriverByName('GTiff').Create(dst_path, width, height, bands=1, eType=gtype,
+                                                  options = [
+                                                      'TILED=YES',
+                                                      'BLOCKXSIZE=256',
+                                                      'BLOCKYSIZE=256',
+                                                      'BIGTIFF=IF_SAFER',
+                                                      'COMPRESS=NONE',
+                                                      'INTERLEAVE=BAND'
+                                                  ],
 
-        with rasterio.open(dst_path, 'w', **dst_profile) as dst:
+                                              )
 
-            if not parallel:
-                with tqdm.tqdm(total=100., desc=f'Creating COG {dst_path}') as progressbar:
-                    [
-                        scale_and_io(src=src,dst=dst,nodata=nodata,w=w,max_threshold=max_threshold, scale_factor=scale_factor)
-                        for w in gen_block_windows(src, progress=progressbar)
-                    ]
-            else:
-                windows = [window for window in gen_block_windows(src)]
+    dst_ds.SetGeoTransform(src_ds.GetGeoTransform())
+    dst_ds.SetProjection(src_ds.GetProjectionRef())
+    band = dst_ds.GetRasterBand(1)
+    band.SetScale(scale_factor)
+    band.SetNoDataValue(nodata)
+    blocks = [e for e in gen_blocks(blockxsize=2650, blockysize=2650, width=width, height=src_ds.RasterYSize)]
+    with tqdm.tqdm(blocks, desc=f'Preprocessing COG {dst_path}', total=len(blocks)) as pbar:
+        for e in blocks:
+            col_start, row_start, col_size, row_size = e
+            block_data = src_ds.ReadAsArray(xoff=col_start, yoff=row_start, xsize=col_size, ysize=row_size,
+                                            band_list=[1],
+                                            callback=gdal_callback_pre,
+                                            callback_data=timeout_event
+                                           )
+            out_block_data = scale_and_convert(src_arr=block_data,nodata=nodata,max_threshold=max_threshold,
+                                               scale_factor=scale_factor, dtype=dtype)
+            dst_ds.WriteArray(out_block_data, xoff=col_start, yoff=row_start, band_list=[1],
+                            callback = gdal_callback_pre,
+                            callback_data = timeout_event
+            )
+            pbar.update()
 
-                # We cannot write to the same file from multiple threads
-                # without causing race conditions. To safely read/write
-                # from multiple threads, we use a lock to protect the
-                # DatasetReader/Writer
-                read_lock = threading.Lock()
-                write_lock = threading.Lock()
-
-                def process(window):
-                    with read_lock:
-                        src_array = src.read(window=window)
-
-                    # The computation can be performed concurrently
-                    result = scale_and_convert(src_array, nodata=nodata, max_threshold=max_threshold, scale_factor=scale_factor, dtype=dtype)
-                    with write_lock:
-                        dst.write(result, window=window)
-                # We map the process() function over the list of
-                # windows.
-                with tqdm.tqdm(windows,total=len(windows), desc=f'Preprocessing {src_path}') as pbar:
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=4 ) as executor:
-                        for __ in executor.map(process, windows):
-                            pbar.update()
-            dst.scales = (scale_factor,)
-
+    src_ds =None
+    dst_ds = None
     os.remove(src_path)
     os.rename(dst_path, src_path)
+
+
+
 
 
 
@@ -388,7 +453,11 @@ async def process_nighttime_data(date: datetime.date = None,
 
             ################### preprocess DNB ########################
             down_dnb_file = downloaded_dnb_files[file_type.value]
-            preprocess_dnb(src_path=down_dnb_file)
+
+            preprocess_dnb(src_path=down_dnb_file,
+                            timeout_event=timeout_event
+                           )
+
             ################### convert to COG ########################
             if concurrent:
                 convert2cogtasks = list()
