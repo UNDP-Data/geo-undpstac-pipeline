@@ -2,7 +2,7 @@ apiVersion: "2023-05-01"
 location: northeurope
 properties:
   osType: Linux
-  restartPolicy: Never
+  restartPolicy: OnFailure
   containers:
     - name: nighttimelights-test
       properties:
@@ -10,8 +10,8 @@ properties:
           - name: AZURE_STORAGE_CONNECTION_STRING
             value: $AZURE_STORAGE_CONNECTION_STRING
         image: undpgeohub.azurecr.io/undp-data/geo-undpstac-pipeline:main
-        #command: ["python", "-m", "undpstac_pipeline.cli", "archive", "-s=2023-09-09", "-e=2023-09-15", "-f"]
-        command: ["python", "-m", "undpstac_pipeline.cli", "daily", "-y 2024", "-m 1", "-d 24", "-f"]
+        command: ["python", "-m", "undpstac_pipeline.cli", "archive", "-s=2023-09-09", "-e=2023-09-15", "-f"]
+        #command: ["python", "-m", "undpstac_pipeline.cli", "daily", "-y 2024", "-m 1", "-d 24", "-f"]
         #command: ["python", "-m", "undpstac_pipeline.cli", "daily", "-y 2024", "-m 1", "-d 24", "--lonmin=0", "--latmin=-10", "--lonmax=10", "--latmin=10", "-f"]
         resources:
           requests:
