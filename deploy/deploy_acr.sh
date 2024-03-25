@@ -6,3 +6,6 @@ envsubst < manifest.template.yml > nighttimelights.yml
 az container delete --resource-group undpdpbppssdganalyticsgeo --name nighttimelights --yes
 az container create --resource-group undpdpbppssdganalyticsgeo --name nighttimelights --file nighttimelights.yml
 rm nighttimelights.yml
+sleep 1m
+
+az container attach -n nighttimelights -g undpdpbppssdganalyticsgeo
