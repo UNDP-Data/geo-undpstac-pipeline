@@ -46,16 +46,16 @@ def upload_file_to_blob(
     blob_client = local_container_client.get_blob_client(blob=dst_path)
 
     size = os.path.getsize(src_path)
-    #with tqdm.wrapattr(open(src_path, 'rb'), "read", total=size, desc=f'Uploading {blob_name}') as dataf:
-    with open(src_path, 'rb') as dataf:
-        logger.debug(f'Uploading {src_path} to {dst_path}')
-        blob_client.upload_blob(
-            data=dataf,
-            overwrite=overwrite,
-            content_settings=ContentSettings(content_type=content_type) if content_type else None,
-            max_concurrency=max_concurrency,
+    with tqdm.wrapattr(open(src_path, 'rb'), "read", total=size, desc=f'Uploading {blob_name}') as dataf:
+        #with open(src_path, 'rb') as dataf:
+            logger.debug(f'Uploading {src_path} to {dst_path}')
+            blob_client.upload_blob(
+                data=dataf,
+                overwrite=overwrite,
+                content_settings=ContentSettings(content_type=content_type) if content_type else None,
+                max_concurrency=max_concurrency,
 
-        )
+            )
 
 
 def upload(
