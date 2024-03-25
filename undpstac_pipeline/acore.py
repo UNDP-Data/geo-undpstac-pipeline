@@ -522,8 +522,8 @@ async def process_nighttime_data(date: datetime.date = None,
             for dnb_file_type, local_cog_file in local_cog_files.items():
                 cog_blob_pth = azure_dnb_cogs[dnb_file_type]
                 logger.info(f'Uploading {dnb_file_type} from {local_cog_file} to {cog_blob_pth}')
-                upload(src_path=local_cog_file, dst_path=cog_blob_pth)
-                #upload_file_to_blob(src_path=local_cog_file, dst_path=cog_blob_pth)
+                #upload(src_path=local_cog_file, dst_path=cog_blob_pth)
+                upload_file_to_blob(src_path=local_cog_file, dst_path=cog_blob_pth)
                 if 'cloud' in dnb_file_type.lower():
                     daily_dnb_cloudmask_blob_path = cog_blob_pth
 
