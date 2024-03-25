@@ -19,16 +19,7 @@ gdal.UseExceptions()
 logger = logging.getLogger(__name__)
 
 
-def progress_cb(complete, message, cb_data):
-    '''Emit progress report in numbers for 10% intervals and dots for 3%'''
-    if int(complete*100) % 10 == 0:
-        print(f'{complete*100:.0f}', end='', flush=True)
-    elif int(complete*100) % 3 == 0:
-        print(f'.', end='', flush=True)
-    timeout_event = cb_data
-    if timeout_event and timeout_event.is_set():
-        logger.info(f'GDAL was signalled to stop...')
-        return 0
+
 def gdal_callback_pre(complete, message, data):
     timeout_event = data
     if timeout_event and timeout_event.is_set():
@@ -298,10 +289,9 @@ def warp_cog(
                 "ADD_ALPHA=NO",
             ],
             copyMetadata=True,
-            #callback=gdal_callback,
-            callback=progress_cb,
-            #callback_data=(timeout_event, progressbar)
-            callback_data=timeout_event
+            callback=gdal_callback,
+            callback_data=(timeout_event, progressbar)
+
         )
         cog_ds = gdal.Warp(
             srcDSOrSrcDSTab=src_path,
@@ -532,8 +522,8 @@ async def process_nighttime_data(date: datetime.date = None,
             for dnb_file_type, local_cog_file in local_cog_files.items():
                 cog_blob_pth = azure_dnb_cogs[dnb_file_type]
                 logger.info(f'Uploading {dnb_file_type} from {local_cog_file} to {cog_blob_pth}')
-                #upload(src_path=local_cog_file, dst_path=cog_blob_pth)
-                upload_file_to_blob(src_path=local_cog_file, dst_path=cog_blob_pth)
+                upload(src_path=local_cog_file, dst_path=cog_blob_pth)
+                #upload_file_to_blob(src_path=local_cog_file, dst_path=cog_blob_pth)
                 if 'cloud' in dnb_file_type.lower():
                     daily_dnb_cloudmask_blob_path = cog_blob_pth
 
