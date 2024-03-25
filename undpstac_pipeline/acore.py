@@ -406,9 +406,9 @@ async def process_nighttime_data(date: datetime.date = None,
             dnb_file_names[k] = fname
             azure_dnb_cogs[k] = os.path.join(AZURE_DNB_COLLECTION_FOLDER,year,month, day, fname)
 
-        cog_dnb_blob_path = azure_dnb_cogs[file_type.value]
+        cog_dnb_blob_path = azure_dnb_cogs[file_type]
         daily_dnb_cloudmask_blob_path = None
-        remote_dnb_file = remote_dnb_files[file_type.value][0]
+        remote_dnb_file = remote_dnb_files[file_type][0]
         if force_processing:
             will_download = force_processing
         else:
@@ -454,7 +454,7 @@ async def process_nighttime_data(date: datetime.date = None,
                     raise Exception('\n'.join(m))
 
             ################### preprocess DNB ########################
-            down_dnb_file = downloaded_dnb_files[file_type.value]
+            down_dnb_file = downloaded_dnb_files[file_type]
 
             preprocess_dnb(src_path=down_dnb_file,
                             timeout_event=timeout_event
@@ -530,10 +530,10 @@ async def process_nighttime_data(date: datetime.date = None,
 
             ################### update stac ########################
 
-            bbox, footprint = get_bbox_and_footprint(raster_path=local_cog_files[file_type.value])
+            bbox, footprint = get_bbox_and_footprint(raster_path=local_cog_files[file_type])
             update_undp_stac(daily_dnb_blob_path=cog_dnb_blob_path,
                              daily_dnb_cloudmask_blob_path=daily_dnb_cloudmask_blob_path,
-                             file_type=file_type.value,
+                             file_type=file_type,
                              bbox=bbox,
                              footprint=footprint
                              )

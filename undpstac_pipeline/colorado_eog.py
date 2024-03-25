@@ -18,12 +18,12 @@ logger = logging.getLogger(__name__)
 
 
 def compute_dnb_filename(date=None, file_type='DNB' ):
-    assert file_type in const.FILE_TYPE_NAMES, f'invalid file_type={file_type}. Valid values are {",".join(const.FILE_TYPE_NAMES)}'
+    #assert file_type in const.FILE_TYPE_NAMES, f'invalid file_type={file_type}. Valid values are {",".join(const.FILE_TYPE_NAMES)}'
     folder = const.FILE_TYPE_FOLDERS[file_type]
     file_name = const.FILE_TYPE_TEMPLATES[file_type].format(date=date.strftime('%Y%m%d'))
     return os.path.join(const.ROOT_EOG_URL,folder,file_name)
 
-def get_dnb_files(date=None, file_type=const.DNB_FILE_TYPES.DNB) -> Dict[Literal[str], tuple]:
+def get_dnb_files(date=None, file_type=None) -> Dict[Literal[str], tuple]:
     """
     COmpute and return the name of files to download
     :param date: the date for whcig to compute the names
@@ -31,14 +31,14 @@ def get_dnb_files(date=None, file_type=const.DNB_FILE_TYPES.DNB) -> Dict[Literal
     :return: dict where key is file type and value is a tuple holding file url and descr
     """
     remote_dnb_file = compute_dnb_filename(date=date, file_type=file_type)
-    file_type_desc = const.DNB_FILE_TYPES_DESC[file_type.value]
-    dnb_file_desc = f'{file_type_desc.value} for {date}'
-    remote_dnb_cloudmask_file = compute_dnb_filename(date=date, file_type=const.DNB_FILE_TYPES.CLOUD_COVER)
-    dnb_cloudmask_desc = f'{const.DNB_FILE_TYPES_DESC.CLOUD_COVER.value} for {date}'
+    file_type_desc = const.DNB_FILE_TYPES_DESC[file_type]
+    dnb_file_desc = f'{file_type_desc} for {date}'
+    remote_dnb_cloudmask_file = compute_dnb_filename(date=date, file_type=const.DNB_FILE_TYPES['CLOUD_COVER'])
+    dnb_cloudmask_desc = f'{const.DNB_FILE_TYPES_DESC["CLOUD_COVER"]} for {date}'
 
     return {
-            file_type.value :  (remote_dnb_file,dnb_file_desc),
-             const.DNB_FILE_TYPES.CLOUD_COVER.value  : (remote_dnb_cloudmask_file, dnb_cloudmask_desc)
+            file_type :  (remote_dnb_file,dnb_file_desc),
+             const.DNB_FILE_TYPES['CLOUD_COVER']  : (remote_dnb_cloudmask_file, dnb_cloudmask_desc)
     }
 
 async def download_file(file_url=None, no_attempts=3, connect_timeout=250, data_read_timeout=9000,

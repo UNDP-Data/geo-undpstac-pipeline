@@ -140,7 +140,7 @@ def create_dnb_stac_item(
         eo = EOExtension.ext(clm_asset, add_if_missing=False)
         eo.apply([const.DNB_BANDS['CLM']])
     item.add_asset(
-        key=const.DNB_FILE_TYPES.CLOUD_COVER.value,
+        key=const.DNB_FILE_TYPES['CLOUD_COVER'],
         asset=clm_asset
     )
 
