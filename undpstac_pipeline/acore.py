@@ -3,7 +3,7 @@ import asyncio
 import numpy as np
 from undpstac_pipeline.utils import should_download, get_bbox_and_footprint,transform_bbox
 from undpstac_pipeline.colorado_eog import get_dnb_files, download_file
-from undpstac_pipeline.const import DNB_FILE_TYPES, AZURE_DNB_COLLECTION_FOLDER, COG_CONVERT_TIMEOUT,AIOHTTP_READ_CHUNKSIZE, COG_DOWNLOAD_TIMEOUT
+from undpstac_pipeline.const import COG_DNB_FILE_TYPE, AZURE_DNB_COLLECTION_FOLDER, COG_CONVERT_TIMEOUT,AIOHTTP_READ_CHUNKSIZE, COG_DOWNLOAD_TIMEOUT
 import datetime
 import logging
 import os
@@ -367,7 +367,7 @@ def translate_cog(
 
 
 async def process_nighttime_data(date: datetime.date = None,
-                                 file_type=DNB_FILE_TYPES.DNB,
+                                 file_type=COG_DNB_FILE_TYPE,
                                  DOWNLOAD_TIMEOUT=COG_DOWNLOAD_TIMEOUT,
                                  CONVERT_TIMEOUT=COG_CONVERT_TIMEOUT,
                                  lonmin=None,
