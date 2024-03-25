@@ -32,7 +32,30 @@ def blob_exists_in_azure(blob_path:str=None, container_client=None):
 
 
 
+def upload_file_to_blob(
+                dst_path: str = None,
+                src_path: str = None,
+                content_type: str = None,
+                overwrite: bool = True,
+                max_concurrency: int = 8,
+                container_client:ContainerClient = None,
+                ):
 
+    _, blob_name = os.path.split(dst_path)
+    local_container_client = container_client if container_client else get_container_client()
+    blob_client = local_container_client.get_blob_client(blob=dst_path)
+
+    size = os.path.getsize(src_path)
+    #with tqdm.wrapattr(open(src_path, 'rb'), "read", total=size, desc=f'Uploading {blob_name}') as dataf:
+    with open(src_path, 'rb') as dataf:
+        logger.debug(f'Uploading {src_path} to {dst_path}')
+        blob_client.upload_blob(
+            data=dataf,
+            overwrite=overwrite,
+            content_settings=ContentSettings(content_type=content_type) if content_type else None,
+            max_concurrency=max_concurrency,
+
+        )
 
 
 def upload(

@@ -30,8 +30,8 @@ async def main():
     daily_parser = subparsers.add_parser(name='daily',
                                          help='Run the pipeline in operational/daily mode',
                                         description='Run the pipeline for a specified or previous day',
-                                         usage='\npython -m nighttimelights_pipeline.cli -y 2024 -m 1 -d 25\n' \
-                                         'python -m nighttimelights_pipeline.cli ')
+                                         usage='\npython -m undpstac_pipeline.cli -y 2024 -m 1 -d 25\n' \
+                                         'python -m undpstac_pipeline.cli ')
 
     daily_parser.add_argument( '-y', '--year', type=int, help='The year of the data to download', required=False)
     daily_parser.add_argument('-m', '--month', type=int, help='The month of the data to download', required=False)
@@ -49,7 +49,7 @@ async def main():
 
     archive_parser = subparsers.add_parser(name='archive', help='Run the pipeline in archive mode',
                                          description='Run the pipeline for every day in a given time interval defined by two dates',
-                                        usage='python -m nighttimelights_pipeline.cli archive -s=2023-01-01 -e=2023-03-31')
+                                        usage='python -m undpstac_pipeline.cli archive -s=2023-01-01 -e=2023-03-31')
     archive_parser.add_argument('-s', '--start-date', type=lambda d: datetime.datetime.strptime(d, '%Y-%m-%d').date(), required=True,
                                 help='The start date from where the pipeline will start processing the VIIRS DNB mosaics')
     archive_parser.add_argument('-e', '--end-date', type=lambda d: datetime.datetime.strptime(d, '%Y-%m-%d').date(), required=True,
