@@ -1,7 +1,7 @@
 import multiprocessing
 import asyncio
 import numpy as np
-from undpstac_pipeline.utils import should_download, get_bbox_and_footprint,transform_bbox
+from undpstac_pipeline.utils import should_download, transform_bbox
 from undpstac_pipeline.colorado_eog import get_dnb_files, download_file
 from undpstac_pipeline.const import COG_DNB_FILE_TYPE, AZURE_DNB_COLLECTION_FOLDER, COG_CONVERT_TIMEOUT,AIOHTTP_READ_CHUNKSIZE, COG_DOWNLOAD_TIMEOUT
 import datetime
@@ -11,8 +11,8 @@ import tqdm
 from osgeo import gdal
 from osgeo import gdal_array
 from undpstac_pipeline.validate import validate
-from undpstac_pipeline.azblob import upload, upload_file_to_blob
-from undpstac_pipeline.stac import update_undp_stac
+from undpstac_pipeline.azblob import  upload_file_to_blob
+from undpstac_pipeline.stac import  push_to_stac
 
 gdal.UseExceptions()
 
@@ -63,95 +63,8 @@ def scale_and_convert(src_arr=None, nodata=None, max_threshold=None, scale_facto
     pos = out_arr > max_threshold
     out_arr[pos] = max_threshold
     out_arr[neg] = nodata
-
     return out_arr
 
-def scale_and_io(src=None, dst=None, w=None, nodata=None, max_threshold=None, scale_factor=None, dtype=None ):
-    """
-    Convert float data to a different dtype
-
-    """
-    src_arr = src.read(1, window=w)
-    out_arr = (src_arr / scale_factor).astype(dtype)
-    pos = out_arr > max_threshold
-    out_arr[pos] = max_threshold
-    neg = out_arr < 0
-    out_arr[neg] = nodata
-    dst.write(out_arr, 1, window=w)
-#
-# def gen_block_windows(ds=None, factor=10, progress=None):
-#     """
-#     Generate block windows for a rasterio dataset scaled by factor
-#     """
-#     by, bx = ds.block_shapes[0]
-#     by*=factor
-#     bx*=factor
-#     total_blocks = (ds.width // bx +1) * (ds.height // by + 1)
-#     m = 0
-#     for ji, window in ds.block_windows(1):
-#         j, i = ji
-#         jm = j % factor
-#         im = i % factor
-#         if jm == 0 and im == 0:
-#             m+=1
-#             if progress:
-#                 n = m/total_blocks*100
-#                 inc = n - progress.n
-#                 progress.update(n=inc)
-#             width = bx if (window.col_off + bx) < ds.width else ds.width - window.col_off
-#             height = by if (window.row_off + by) < ds.height else ds.height - window.row_off
-#             #if m>(total_blocks/4):return
-#             yield  Window(col_off=window.col_off , row_off=window.row_off, width=width, height=height)
-#
-#
-# def preprocess_dnb(src_path=None, scale_factor=0.01, dtype='uint16', parallel=True):
-#
-#     assert dtypes.check_dtype(dtype), f'Invalid dtype={dtype}. Valid values are {dtypes.dtype_ranges.keys()}'
-#     minr, maxr = dtypes.dtype_ranges[dtype]
-#     nodata = maxr-35
-#     max_threshold = nodata-1
-#     dst_path = f'{src_path}i'
-#     with rasterio.open(src_path) as src:
-#         dst_profile = src.profile
-#         dst_profile.update(dict(dtype=dtype), nodata=nodata)
-#
-#
-#         with rasterio.open(dst_path, 'w', **dst_profile) as dst:
-#
-#             if not parallel:
-#                 with tqdm.tqdm(total=100., desc=f'Creating COG {dst_path}') as progressbar:
-#                     [
-#                         scale_and_io(src=src,dst=dst,nodata=nodata,w=w,max_threshold=max_threshold, scale_factor=scale_factor)
-#                         for w in gen_block_windows(src, progress=progressbar)
-#                     ]
-#             else:
-#                 windows = [window for window in gen_block_windows(src)]
-#
-#                 # We cannot write to the same file from multiple threads
-#                 # without causing race conditions. To safely read/write
-#                 # from multiple threads, we use a lock to protect the
-#                 # DatasetReader/Writer
-#                 read_lock = threading.Lock()
-#                 write_lock = threading.Lock()
-#
-#                 def process(window):
-#                     with read_lock:
-#                         src_array = src.read(window=window)
-#
-#                     # The computation can be performed concurrently
-#                     result = scale_and_convert(src_array, nodata=nodata, max_threshold=max_threshold, scale_factor=scale_factor, dtype=dtype)
-#                     with write_lock:
-#                         dst.write(result, window=window)
-#                 # We map the process() function over the list of
-#                 # windows.
-#                 with tqdm.tqdm(windows,total=len(windows), desc=f'Preprocessing {src_path}') as pbar:
-#                     with concurrent.futures.ThreadPoolExecutor(max_workers=4 ) as executor:
-#                         for __ in executor.map(process, windows):
-#                             pbar.update()
-#             dst.scales = (scale_factor,)
-#
-#     os.remove(src_path)
-#     os.rename(dst_path, src_path)
 
 def preprocess_dnb(src_path=None, scale_factor=0.01, dtype='uint16', timeout_event=None):
     """
@@ -189,7 +102,7 @@ def preprocess_dnb(src_path=None, scale_factor=0.01, dtype='uint16', timeout_eve
     dst_ds.SetGeoTransform(src_ds.GetGeoTransform())
     dst_ds.SetProjection(src_ds.GetProjectionRef())
     band = dst_ds.GetRasterBand(1)
-    band.SetScale(scale_factor)
+    band.SetScale(scale_factor*0.1)
     band.SetNoDataValue(nodata)
     blocks = [e for e in gen_blocks(blockxsize=2650, blockysize=2650, width=width, height=src_ds.RasterYSize)]
     with tqdm.tqdm(blocks, desc=f'Preprocessing {src_path}', total=len(blocks)) as pbar:
@@ -207,12 +120,37 @@ def preprocess_dnb(src_path=None, scale_factor=0.01, dtype='uint16', timeout_eve
                             callback_data = timeout_event
             )
             pbar.update()
-
+    with tqdm.tqdm(desc=f'Computing stats for {dst_path}', total=100) as pbar:
+        dst_ds.GetRasterBand(1).ComputeStatistics(False,  gdal_callback, (timeout_event, pbar))
     src_ds =None
     dst_ds = None
 
     return dst_path
 
+
+
+
+def gen_blocks1(ds=None,blockxsize=None, blockysize=None, xmin=None, ymin=None, xmax=None, ymax=None ):
+    """
+    Generate reading block for gdal ReadAsArray
+    """
+    width = ds.RasterXSize
+    height = ds.RasterXSize
+    wi = list(range(0, width, blockxsize))
+    if width % blockxsize != 0:
+        wi += [width]
+    hi = list(range(0, height, blockysize))
+    if height % blockysize != 0:
+        hi += [height]
+    nblocks = len(wi) * len(hi)
+    m = 0
+    for col_start, col_end in zip(wi[:-1], wi[1:]):
+        col_size = col_end - col_start
+        for row_start, row_end in zip(hi[:-1], hi[1:]):
+            m+=1
+            #n = m/nblocks*100
+            row_size = row_end - row_start
+            yield col_start, row_start, col_size, row_size
 
 
 
@@ -235,12 +173,6 @@ def gen_blocks(blockxsize=None, blockysize=None, width=None, height=None ):
             #n = m/nblocks*100
             row_size = row_end - row_start
             yield col_start, row_start, col_size, row_size
-
-
-
-
-
-
 
 
 
@@ -297,6 +229,7 @@ def warp_cog(
             destNameOrDestDS=dst_path,
             options=wo,
         )
+
 
     del cog_ds
     warnings, errors, details = validate(dst_path, full_check=True)
@@ -521,23 +454,14 @@ async def process_nighttime_data(date: datetime.date = None,
             for dnb_file_type, local_cog_file in local_cog_files.items():
                 cog_blob_pth = azure_dnb_cogs[dnb_file_type]
                 logger.info(f'Uploading {dnb_file_type} from {local_cog_file} to {cog_blob_pth}')
-                #upload(src_path=local_cog_file, dst_path=cog_blob_pth)
                 upload_file_to_blob(src_path=local_cog_file, dst_path=cog_blob_pth)
-                if 'cloud' in dnb_file_type.lower():
-                    daily_dnb_cloudmask_blob_path = cog_blob_pth
-
-
             ################### update stac ########################
 
-            bbox, footprint = get_bbox_and_footprint(raster_path=local_cog_files[file_type])
-            update_undp_stac(daily_dnb_blob_path=cog_dnb_blob_path,
-                             daily_dnb_cloudmask_blob_path=daily_dnb_cloudmask_blob_path,
-                             file_type=file_type,
-                             bbox=bbox,
-                             footprint=footprint
-                             )
-
-
+            push_to_stac(
+                local_cog_files=local_cog_files,
+                azure_cog_files=azure_dnb_cogs,
+                file_type=file_type
+            )
 
         else:
             logger.info(f'No nighttime lights data will be processed for {date} from Colorado EOG ')
@@ -553,17 +477,6 @@ async def process_nighttime_data(date: datetime.date = None,
         logger.error(f"Failed to process data for {date.strftime('%Y-%m-%d')}: {e.__class__.__name__} {e} ")
         raise
 
-
-
-def process_historical_nighttime_data(start_date: datetime.datetime, end_date: datetime.datetime):
-    """
-    Process historical nighttime data
-    :param start_date: datetime.datetime
-    :param end_date: datetime.datetime
-    :return: None
-    """
-    for date in range((end_date - start_date).days):
-        process_nighttime_data(start_date + datetime.timedelta(days=date))
 
 
 start = datetime.datetime.now()

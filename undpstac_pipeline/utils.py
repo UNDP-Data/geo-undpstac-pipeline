@@ -131,7 +131,7 @@ def get_bbox_and_footprint(raster_path=None):
         [xmin, ymin]
 
     ])
-    return bbox, mapping(footprint)
+    return src_srs.GetAuthorityCode(None), bbox, mapping(footprint)
 
 
 

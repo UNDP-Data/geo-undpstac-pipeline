@@ -1,20 +1,21 @@
-import datetime
+from osgeo import gdal
+from azure.core.exceptions import ResourceNotFoundError
 import itertools
 from typing import Any
 from urllib.parse import urlparse
 import pystac
 from pystac.extensions.eo import  EOExtension
+from pystac.extensions.raster import RasterExtension, RasterBand
 from pystac.provider import Provider, ProviderRole
 from pystac import stac_io, HREF
-from tempfile import TemporaryDirectory
 import os
 from undpstac_pipeline import const
 from undpstac_pipeline.azblob import blob_exists_in_azure, get_container_client, upload, download
 from undpstac_pipeline import utils as u
+
 from pystac.layout import  CustomLayoutStrategy
 import logging
 
-tmp_dir = TemporaryDirectory()
 logger = logging.getLogger(__name__)
 
 def catalog_f(catalog:pystac.Catalog=None, parent_dir:str=None, is_root:bool=False ) -> str:
@@ -85,6 +86,63 @@ def create_stac_catalog(
     return catalog
 
 
+def create_dnb_stac_raster_item(
+                        item_id=None,
+                        local_cog_files=None,
+                        azure_cog_files=None,
+                        az_stacio=None,
+                        file_type=None,
+):
+
+    epsg_code, bbox, footprint = u.get_bbox_and_footprint(raster_path=local_cog_files[file_type])
+    azure_cog_path = azure_cog_files[file_type]
+    _, item_name = os.path.split(azure_cog_path)
+    item_date = u.extract_date_from_dnbfile(item_name)
+    item = pystac.Item(
+        id=item_id,
+        geometry=footprint,
+        bbox=bbox,
+        datetime=item_date,
+        properties={},
+        stac_extensions=['raster', 'proj']
+    )
+    item.ext.add('proj')
+    item.ext.proj.epsg = epsg_code
+
+    for ftype, local_cog_file_path in local_cog_files.items():
+        azure_cog_path = azure_cog_files[ftype]
+        azure_blob_client = az_stacio.container_client.get_blob_client(blob=azure_cog_path)
+        desc = const.DNB_FILE_TYPES_DESC[ftype]
+        asset = pystac.Asset(
+            href=azure_blob_client.url,
+            media_type=pystac.MediaType.COG,
+            title=f'{desc} from Colorado schools of Mines',
+            roles=[('analytics')]
+        )
+        raster = RasterExtension.ext(asset, add_if_missing=False)
+        info = gdal.Info(local_cog_file_path, format='json')
+        bprops = info['bands'].pop()
+        props = dict()
+        props['nodata'] = bprops['noDataValue']
+        props['data_type'] = bprops['type']
+        if 'scale' in bprops:
+            props['scale'] = bprops['scale']
+        if 'offset' in bprops:
+            props['offset'] = bprops['offset']
+
+        if ftype == file_type:
+            props.update({'unit': 'μWcm-2sr-1'})
+        rb = RasterBand(properties=props)
+        raster.apply([rb])
+
+        item.add_asset(
+            key=ftype,
+            asset=asset,
+        )
+    return item
+
+
+
 def create_dnb_stac_item(
                         item_id=None,
                         daily_dnb_blob_path=None,
@@ -105,8 +163,7 @@ def create_dnb_stac_item(
     _, item_name = os.path.split(daily_dnb_blob_path)
     item_date = u.extract_date_from_dnbfile(item_name)
 
-    item = pystac.Item(#id=u.generate_id(name=item_path),
-                        #id=f'nighttime-lights-{item_date.strftime("%Y-%m-%d")}',
+    item = pystac.Item(
                         id=item_id,
                         geometry=footprint,
                         bbox=bbox,
@@ -188,6 +245,88 @@ def create_undp_stac_tree():
     #root_catalog.save(stac_io=az_stacio)
     return root_catalog
 
+
+def push_to_stac(
+        local_cog_files=None,
+        azure_cog_files=None,
+        file_type=None,
+        collection_folder=const.AZURE_DNB_COLLECTION_FOLDER
+    ):
+
+    az_stacio = AzureStacIO()
+    root_catalog_url = os.path.join(az_stacio.container_client.url, const.STAC_CATALOG_NAME)
+
+    try:
+        logger.info(f'...reading ROOT STAC catalog from {root_catalog_url} ')
+        root_catalog = pystac.Catalog.from_file(root_catalog_url, stac_io=az_stacio)
+    except ResourceNotFoundError as e:
+        root_catalog = create_undp_stac_tree()
+
+    collection_ids = [e.id for e in root_catalog.get_collections()]
+    assert collection_folder in collection_ids, f'{collection_folder} collection does not exist. Something enexpected happened!'
+
+    nighttime_collection = root_catalog.get_child(collection_folder)
+
+
+    pth, blob_name = os.path.split(azure_cog_files[file_type])
+    item_date = u.extract_date_from_dnbfile(blob_name)
+    year = item_date.strftime('%Y')
+    month = item_date.strftime('%m')
+
+
+    year_catalog_id = f'{collection_folder}-{year}'
+    year_catalog = nighttime_collection.get_child(year_catalog_id)
+    year_catalog_exists = year_catalog is not None
+
+    if not year_catalog_exists:
+        year_catalog = create_stac_catalog(
+            id=year_catalog_id,
+            title=f'Nighttime lights in {year}',
+            description=f'VIIRS DNB nighttime lights nightly mosaics in {year}'
+        )
+        nighttime_collection.add_child(year_catalog)
+    month_catalog_id = f'{year_catalog_id}-{month}'
+    month_catalog = year_catalog.get_child(month_catalog_id)
+    month_catalog_exists = month_catalog is not None
+    if not month_catalog_exists:
+        month_catalog = create_stac_catalog(
+            id=month_catalog_id,
+            title=f'Nighttime lights in {year}-{month}',
+            description=f'VIIRS DNB nighttime lights nightly mosaics in {year}-{month}'
+        )
+        year_catalog.add_child(month_catalog)
+
+    item_id = f'SVDNB_npp_d{item_date.strftime("%Y%m%d")}'
+    daily_dnb_item = create_dnb_stac_raster_item(
+        item_id=item_id,
+        local_cog_files=local_cog_files,
+        azure_cog_files=azure_cog_files,
+        az_stacio=az_stacio,
+        file_type=file_type,
+
+    )
+    items = month_catalog.get_items(item_id)
+    for item in items:
+        if item.id == daily_dnb_item.id:
+            logger.info(f'updating item id {item.id}')
+            month_catalog.remove_item(item_id=item.id)
+    month_catalog.add_item(daily_dnb_item)
+
+    item_datetime = daily_dnb_item.datetime
+    temporal_extent = nighttime_collection.extent.temporal
+
+    if temporal_extent is None:
+        temporal_extent = pystac.TemporalExtent(intervals=[[item_datetime, item_datetime]])
+        nighttime_collection.extent.temporal = temporal_extent
+    else:
+        update_temporal_extent(item_datetime=item_datetime, temporal_extent=temporal_extent)
+
+    root_catalog.normalize_hrefs(root_href=az_stacio.container_client.url,
+                                 strategy=CustomLayoutStrategy(catalog_func=catalog_f, item_func=item_f))
+
+    logger.info('Saving STAC structure to Azure')
+    root_catalog.make_all_asset_hrefs_relative()
+    root_catalog.save(stac_io=az_stacio)
 
 
 def update_undp_stac(
@@ -307,6 +446,7 @@ def update_undp_stac(
     root_catalog.save(stac_io=az_stacio)
 
 
+
 def update_temporal_extent(item_datetime = None, temporal_extent=None):
     """
     The update ignored the fact the first interval is global
@@ -327,20 +467,20 @@ def update_temporal_extent(item_datetime = None, temporal_extent=None):
 if __name__ == '__main__':
     logging.basicConfig()
     logger.setLevel(logging.INFO)
-
-    te = pystac.TemporalExtent([const.DNB_START_DATE, const.DNB_START_DATE])
-    #print(te.to_dict())
-    ndt = const.DNB_START_DATE + datetime.timedelta(days=1)
-    update_temporal_extent(item_datetime=ndt, temporal_extent=te)
-    print(te.to_dict())
-    ndt = const.DNB_START_DATE + datetime.timedelta(days=5)
-    update_temporal_extent(item_datetime=ndt, temporal_extent=te)
-    print(te.to_dict())
-
-    ndt = const.DNB_START_DATE + datetime.timedelta(days=3)
-    update_temporal_extent(item_datetime=ndt, temporal_extent=te)
-    print(te.to_dict())
-    ndt = const.DNB_START_DATE + datetime.timedelta(days=4)
-    update_temporal_extent(item_datetime=ndt, temporal_extent=te)
-    print(te.to_dict())
+    push_to_stac()
+    # te = pystac.TemporalExtent([const.DNB_START_DATE, const.DNB_START_DATE])
+    # #print(te.to_dict())
+    # ndt = const.DNB_START_DATE + datetime.timedelta(days=1)
+    # update_temporal_extent(item_datetime=ndt, temporal_extent=te)
+    # print(te.to_dict())
+    # ndt = const.DNB_START_DATE + datetime.timedelta(days=5)
+    # update_temporal_extent(item_datetime=ndt, temporal_extent=te)
+    # print(te.to_dict())
+    #
+    # ndt = const.DNB_START_DATE + datetime.timedelta(days=3)
+    # update_temporal_extent(item_datetime=ndt, temporal_extent=te)
+    # print(te.to_dict())
+    # ndt = const.DNB_START_DATE + datetime.timedelta(days=4)
+    # update_temporal_extent(item_datetime=ndt, temporal_extent=te)
+    # print(te.to_dict())
 
