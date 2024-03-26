@@ -58,10 +58,10 @@ def scale_and_convert(src_arr=None, nodata=None, max_threshold=None, scale_facto
     Convert float data to a different dtype
 
     """
+    neg = src_arr < 0
     out_arr = (src_arr / scale_factor).astype(dtype)
     pos = out_arr > max_threshold
     out_arr[pos] = max_threshold
-    neg = out_arr < 0
     out_arr[neg] = nodata
 
     return out_arr
@@ -167,6 +167,7 @@ def preprocess_dnb(src_path=None, scale_factor=0.01, dtype='uint16', timeout_eve
 
     nodata = ii.max-35
     max_threshold = nodata-1
+
     src_ds = gdal.OpenEx(src_path, gdal.OF_READONLY|gdal.OF_RASTER)
     dst_path = f'{src_path}i'
     width = src_ds.RasterXSize
@@ -176,8 +177,8 @@ def preprocess_dnb(src_path=None, scale_factor=0.01, dtype='uint16', timeout_eve
     dst_ds = gdal.GetDriverByName('GTiff').Create(dst_path, width, height, bands=1, eType=gtype,
                                                   options = [
                                                       'TILED=YES',
-                                                      'BLOCKXSIZE=256',
-                                                      'BLOCKYSIZE=256',
+                                                      'BLOCKXSIZE=2560',
+                                                      'BLOCKYSIZE=2560',
                                                       'BIGTIFF=IF_SAFER',
                                                       'COMPRESS=NONE',
                                                       'INTERLEAVE=BAND'
@@ -191,7 +192,7 @@ def preprocess_dnb(src_path=None, scale_factor=0.01, dtype='uint16', timeout_eve
     band.SetScale(scale_factor)
     band.SetNoDataValue(nodata)
     blocks = [e for e in gen_blocks(blockxsize=2650, blockysize=2650, width=width, height=src_ds.RasterYSize)]
-    with tqdm.tqdm(blocks, desc=f'Preprocessing COG {dst_path}', total=len(blocks)) as pbar:
+    with tqdm.tqdm(blocks, desc=f'Preprocessing {src_path}', total=len(blocks)) as pbar:
         for e in blocks:
             col_start, row_start, col_size, row_size = e
             block_data = src_ds.ReadAsArray(xoff=col_start, yoff=row_start, xsize=col_size, ysize=row_size,
@@ -209,10 +210,8 @@ def preprocess_dnb(src_path=None, scale_factor=0.01, dtype='uint16', timeout_eve
 
     src_ds =None
     dst_ds = None
-    os.remove(src_path)
-    os.rename(dst_path, src_path)
 
-
+    return dst_path
 
 
 
@@ -456,10 +455,10 @@ async def process_nighttime_data(date: datetime.date = None,
             ################### preprocess DNB ########################
             down_dnb_file = downloaded_dnb_files[file_type]
 
-            preprocess_dnb(src_path=down_dnb_file,
+            preproc_dnb_file=preprocess_dnb(src_path=down_dnb_file,
                             timeout_event=timeout_event
                            )
-
+            downloaded_dnb_files[file_type] = preproc_dnb_file
             ################### convert to COG ########################
             if concurrent:
                 convert2cogtasks = list()
