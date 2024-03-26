@@ -131,7 +131,7 @@ def create_dnb_stac_raster_item(
             props['offset'] = bprops['offset']
 
         if ftype == file_type:
-            props.update({'unit': 'μWcm-2sr-1'})
+            props.update({'unit': 'nWcm-2sr-1'})
         rb = RasterBand(properties=props)
         raster.apply([rb])
 

@@ -47,6 +47,8 @@ def set_metadata(src_path=None, dst_path=None, description=None):
     # COGS do not like to be edited. So adding metadata will BREAK them
     src_cog_ds.SetMetadata({f'DNB_FILE_SIZE_{ctime}': f'{os.path.getsize(src_path)}'})
     band.SetMetadata({'DESCRIPTION': description})
+    band.SetMetadata({'Source': 'Colorado School of mines'})
+    band.SetMetadata({'Unit': 'nWcm-2sr-1'})
     del src_cog_ds
     return dtp
 
@@ -102,7 +104,7 @@ def preprocess_dnb(src_path=None, scale_factor=0.01, dtype='uint16', timeout_eve
     dst_ds.SetGeoTransform(src_ds.GetGeoTransform())
     dst_ds.SetProjection(src_ds.GetProjectionRef())
     band = dst_ds.GetRasterBand(1)
-    band.SetScale(scale_factor*0.1)
+    band.SetScale(scale_factor)
     band.SetNoDataValue(nodata)
     blocks = [e for e in gen_blocks(blockxsize=2650, blockysize=2650, width=width, height=src_ds.RasterYSize)]
     with tqdm.tqdm(blocks, desc=f'Preprocessing {src_path}', total=len(blocks)) as pbar:
