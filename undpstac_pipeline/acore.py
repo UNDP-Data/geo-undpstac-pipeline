@@ -120,8 +120,7 @@ def preprocess_dnb(src_path=None, scale_factor=0.01, dtype='uint16', timeout_eve
                             callback_data = timeout_event
             )
             pbar.update()
-    with tqdm.tqdm(desc=f'Computing stats for {dst_path}', total=100) as pbar:
-        dst_ds.GetRasterBand(1).ComputeStatistics(False,  gdal_callback, (timeout_event, pbar))
+
     src_ds =None
     dst_ds = None
 
@@ -218,6 +217,7 @@ def warp_cog(
                 "BIGTIFF=IF_SAFER",
                 "NUM_THREADS=ALL_CPUS",
                 "ADD_ALPHA=NO",
+                "STATISTICS=YES"
             ],
             copyMetadata=True,
             callback=gdal_callback,

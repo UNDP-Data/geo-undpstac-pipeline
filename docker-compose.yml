@@ -7,3 +7,7 @@ services:
     volumes:
       - .:/app
       - /tmp:/tmp
+      - /etc/passwd:/etc/passwd:ro
+      - /etc/group:/etc/group:ro
+    environment:
+      - user=1000
