@@ -1,3 +1,5 @@
+import json
+
 from osgeo import gdal
 from azure.core.exceptions import ResourceNotFoundError
 import itertools
@@ -104,7 +106,7 @@ def create_dnb_stac_raster_item(
         bbox=bbox,
         datetime=item_date,
         properties={},
-        stac_extensions=['raster', 'proj']
+        stac_extensions=['raster']
     )
     item.ext.add('proj')
     item.ext.proj.epsg = epsg_code
@@ -116,7 +118,8 @@ def create_dnb_stac_raster_item(
         asset = pystac.Asset(
             href=azure_blob_client.url,
             media_type=pystac.MediaType.COG,
-            title=f'{desc} from Colorado schools of Mines',
+            title=f'{const.DNB_FILE_TYPE_NAMES[ftype]}',
+            description=f'{desc} from Colorado schools of Mines',
             roles=[('analytics')]
         )
         raster = RasterExtension.ext(asset, add_if_missing=False)
@@ -208,7 +211,8 @@ def create_nighttime_lights_collection():
 
 
     spatial_extent = pystac.SpatialExtent(bboxes=[const.DNB_BBOX])
-    col = pystac.Collection(id='nighttime-lights',description='Nighttime lights mosaics in COG format from Colorado School of Mines  ', title='Nighthly VIIRS DNB mosaics',
+    col = pystac.Collection(id='nighttime-lights',description='Nighttime lights mosaics in COG format from Colorado School of Mines',
+                            title='Nighthly nighttime lights mosaics',
                             license='Creative Commons Attribution 4.0 International',
                             providers=[
                                 Provider(name='Colorado Schools of Mines',roles=[ProviderRole.PRODUCER, ProviderRole.LICENSOR]),
@@ -240,7 +244,8 @@ def create_undp_stac_tree():
     logger.info('...creating nighttime lights STAC collection')
     nighttime_collection = create_nighttime_lights_collection()
     # add collection to root catalog
-    root_catalog.add_child(nighttime_collection )
+    l = root_catalog.add_child(nighttime_collection )
+
     # save to azure through
     #root_catalog.save(stac_io=az_stacio)
     return root_catalog
@@ -274,27 +279,28 @@ def push_to_stac(
     month = item_date.strftime('%m')
 
 
-    year_catalog_id = f'{collection_folder}-{year}'
-    year_catalog = nighttime_collection.get_child(year_catalog_id)
-    year_catalog_exists = year_catalog is not None
+    yearly_catalog_id = f'{collection_folder}-{year}'
+    yearly_catalog = nighttime_collection.get_child(yearly_catalog_id, )
+    yearly_catalog_exists = yearly_catalog is not None
 
-    if not year_catalog_exists:
-        year_catalog = create_stac_catalog(
-            id=year_catalog_id,
+    if not yearly_catalog_exists:
+        yearly_catalog = create_stac_catalog(
+            id=yearly_catalog_id,
             title=f'Nighttime lights in {year}',
             description=f'VIIRS DNB nighttime lights nightly mosaics in {year}'
         )
-        nighttime_collection.add_child(year_catalog)
-    month_catalog_id = f'{year_catalog_id}-{month}'
-    month_catalog = year_catalog.get_child(month_catalog_id)
-    month_catalog_exists = month_catalog is not None
-    if not month_catalog_exists:
-        month_catalog = create_stac_catalog(
-            id=month_catalog_id,
+        nighttime_collection.add_child(yearly_catalog)
+
+    monthly_catalog_id = f'{yearly_catalog_id}-{month}'
+    monthly_catalog = yearly_catalog.get_child(monthly_catalog_id)
+    monthly_catalog_exists = monthly_catalog is not None
+    if not monthly_catalog_exists:
+        monthly_catalog = create_stac_catalog(
+            id=monthly_catalog_id,
             title=f'Nighttime lights in {year}-{month}',
             description=f'VIIRS DNB nighttime lights nightly mosaics in {year}-{month}'
         )
-        year_catalog.add_child(month_catalog)
+        yearly_catalog.add_child(monthly_catalog)
 
     item_id = f'SVDNB_npp_d{item_date.strftime("%Y%m%d")}'
     daily_dnb_item = create_dnb_stac_raster_item(
@@ -305,12 +311,13 @@ def push_to_stac(
         file_type=file_type,
 
     )
-    items = month_catalog.get_items(item_id)
+    items = monthly_catalog.get_items(item_id)
     for item in items:
         if item.id == daily_dnb_item.id:
             logger.info(f'updating item id {item.id}')
-            month_catalog.remove_item(item_id=item.id)
-    month_catalog.add_item(daily_dnb_item)
+            monthly_catalog.remove_item(item_id=item.id)
+    link = monthly_catalog.add_item(daily_dnb_item)
+    link.extra_fields = {'date':item_date.strftime('%Y%m%d')}
 
     item_datetime = daily_dnb_item.datetime
     temporal_extent = nighttime_collection.extent.temporal
@@ -326,7 +333,8 @@ def push_to_stac(
 
     logger.info('Saving STAC structure to Azure')
     root_catalog.make_all_asset_hrefs_relative()
-    root_catalog.save(stac_io=az_stacio)
+    #root_catalog.save(stac_io=az_stacio)
+    print(json.dumps(monthly_catalog.to_dict(), indent=4))
 
 
 def update_undp_stac(

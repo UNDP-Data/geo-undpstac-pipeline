@@ -13,7 +13,7 @@ from osgeo import gdal_array
 from undpstac_pipeline.validate import validate
 from undpstac_pipeline.azblob import  upload_file_to_blob
 from undpstac_pipeline.stac import  push_to_stac
-
+import math
 gdal.UseExceptions()
 
 logger = logging.getLogger(__name__)
@@ -32,8 +32,6 @@ def gdal_callback(complete, message, data):
     if timeout_event and timeout_event.is_set():
         logger.info(f'GDAL was signalled to stop...')
         return 0
-
-
 
 
 def set_metadata(src_path=None, dst_path=None, description=None):
@@ -66,6 +64,90 @@ def scale_and_convert(src_arr=None, nodata=None, max_threshold=None, scale_facto
     out_arr[pos] = max_threshold
     out_arr[neg] = nodata
     return out_arr
+
+
+def preprocess_dnb_bbox(src_path=None, scale_factor=0.01, dtype='uint16', timeout_event=None,
+                        lonmin=None, latmin=None, lonmax=None, latmax=None):
+    """
+    Preprocess src_path as to reduce it's size. This si achieved by
+        1 - changing the dtype to uint16 from float32
+        2 - applying a scale factor = 0.01 because the original data was rounded to this precision
+
+        The dtype and scale factor contrained the nodata value to be 655 and max value to be
+        654. These are store in the processed GTIFF as 65500  respectively 65400
+    """
+
+    ii = np.iinfo(np.dtype(dtype))
+
+    nodata = ii.max-35
+    max_threshold = nodata-1
+
+    src_ds = gdal.OpenEx(src_path, gdal.OF_READONLY|gdal.OF_RASTER)
+    dst_path = f'{src_path}i'
+
+    ulx, xres, xskew, uly, yskew, yres = src_ds.GetGeoTransform()
+    if lonmin is None:lonmin = ulx
+    if lonmax is None:lonmax =  ulx + (src_ds.RasterXSize * xres)
+    if latmax is None:latmax = uly
+    if latmin is None: latmin = uly + (src_ds.RasterYSize * yres)
+
+    xminc = math.floor((lonmin - ulx) / xres)
+    xmaxc = math.floor((lonmax - ulx) / xres )
+    ymaxr = math.floor((latmin - uly) / yres)
+    yminr = math.floor((latmax - uly) / yres)
+
+
+    width = xmaxc-xminc + 1
+    height = ymaxr-yminr + 1
+    gtype = gdal_array.NumericTypeCodeToGDALTypeCode(np.dtype(dtype))
+    dst_ds = gdal.GetDriverByName('GTiff').Create(dst_path, width, height, bands=1, eType=gtype,
+                                                  options = [
+                                                      'TILED=YES',
+                                                      'BLOCKXSIZE=2560',
+                                                      'BLOCKYSIZE=2560',
+                                                      'BIGTIFF=IF_SAFER',
+                                                      'COMPRESS=NONE',
+                                                      'INTERLEAVE=BAND'
+                                                  ],
+
+                                              )
+
+    dst_ds.SetGeoTransform([lonmin, xres, xskew, latmax, yskew, yres])
+    dst_ds.SetProjection(src_ds.GetProjectionRef())
+    band = dst_ds.GetRasterBand(1)
+    band.SetScale(scale_factor)
+    band.SetNoDataValue(nodata)
+    #blocks = [e for e in gen_blocks(blockxsize=2650, blockysize=2650, width=width, height=src_ds.RasterYSize)]
+    blocks = [e for e in gen_blocks1(
+        ds=src_ds,
+        blockxsize=2650, blockysize=2650,
+        xminc=xminc, xmaxc=xmaxc, yminr=yminr, ymaxr=ymaxr
+        )]
+
+    with tqdm.tqdm(blocks, desc=f'Preprocessing {src_path}', total=len(blocks)) as pbar:
+        for e in blocks:
+            col_start, row_start, col_size, row_size = e
+
+            block_data = src_ds.ReadAsArray(xoff=col_start, yoff=row_start, xsize=col_size, ysize=row_size,
+                                            band_list=[1],
+                                            callback=gdal_callback_pre,
+                                            callback_data=timeout_event
+                                           )
+
+            out_block_data = scale_and_convert(src_arr=block_data,nodata=nodata,max_threshold=max_threshold,
+                                               scale_factor=scale_factor, dtype=dtype)
+
+            dst_ds.WriteArray(out_block_data, xoff=(col_start-xminc), yoff=row_start-yminr, band_list=[1],
+                            callback = gdal_callback_pre,
+                            callback_data = timeout_event
+            )
+            pbar.update()
+
+    src_ds =None
+    dst_ds = None
+
+    return dst_path
+
 
 
 def preprocess_dnb(src_path=None, scale_factor=0.01, dtype='uint16', timeout_event=None):
@@ -107,6 +189,7 @@ def preprocess_dnb(src_path=None, scale_factor=0.01, dtype='uint16', timeout_eve
     band.SetScale(scale_factor)
     band.SetNoDataValue(nodata)
     blocks = [e for e in gen_blocks(blockxsize=2650, blockysize=2650, width=width, height=src_ds.RasterYSize)]
+
     with tqdm.tqdm(blocks, desc=f'Preprocessing {src_path}', total=len(blocks)) as pbar:
         for e in blocks:
             col_start, row_start, col_size, row_size = e
@@ -131,10 +214,12 @@ def preprocess_dnb(src_path=None, scale_factor=0.01, dtype='uint16', timeout_eve
 
 
 
-def gen_blocks1(ds=None,blockxsize=None, blockysize=None, xmin=None, ymin=None, xmax=None, ymax=None ):
+def gen_blocks1(ds=None,blockxsize=None, blockysize=None, xminc=None, yminr=None, xmaxc=None, ymaxr=None ):
     """
     Generate reading block for gdal ReadAsArray
     """
+
+
     width = ds.RasterXSize
     height = ds.RasterXSize
     wi = list(range(0, width, blockxsize))
@@ -143,14 +228,16 @@ def gen_blocks1(ds=None,blockxsize=None, blockysize=None, xmin=None, ymin=None, 
     hi = list(range(0, height, blockysize))
     if height % blockysize != 0:
         hi += [height]
-    nblocks = len(wi) * len(hi)
-    m = 0
     for col_start, col_end in zip(wi[:-1], wi[1:]):
         col_size = col_end - col_start
+        if  xminc > col_end or xmaxc < col_start:continue
+        if col_start < xminc:col_start = xminc
+        if col_start+col_size>xmaxc:col_size=xmaxc-col_start
         for row_start, row_end in zip(hi[:-1], hi[1:]):
-            m+=1
-            #n = m/nblocks*100
+            if yminr > row_end or ymaxr < row_start :continue
+            if row_start<yminr:row_start=yminr
             row_size = row_end - row_start
+            if row_start+row_size>ymaxr:row_size= ymaxr-row_start
             yield col_start, row_start, col_size, row_size
 
 
@@ -165,13 +252,9 @@ def gen_blocks(blockxsize=None, blockysize=None, width=None, height=None ):
     hi = list(range(0, height, blockysize))
     if height % blockysize != 0:
         hi += [height]
-    nblocks = len(wi) * len(hi)
-    m = 0
     for col_start, col_end in zip(wi[:-1], wi[1:]):
         col_size = col_end - col_start
         for row_start, row_end in zip(hi[:-1], hi[1:]):
-            m+=1
-            #n = m/nblocks*100
             row_size = row_end - row_start
             yield col_start, row_start, col_size, row_size
 
@@ -202,7 +285,7 @@ def warp_cog(
             dstSRS='EPSG:3857',
             overviewLevel=None,
             #outputType= gdal.GDT_Int16 if dtp == gdal.GDT_Float32 else dtp,
-            #multithread=True,
+            multithread=True,
             outputBounds=[lonmin, latmin, lonmax, latmax],  # <xmin> <ymin> <xmax> <ymax>
             outputBoundsSRS='EPSG:4326',
             resampleAlg='NEAREST',
@@ -341,7 +424,6 @@ async def process_nighttime_data(date: datetime.date = None,
             azure_dnb_cogs[k] = os.path.join(AZURE_DNB_COLLECTION_FOLDER,year,month, day, fname)
 
         cog_dnb_blob_path = azure_dnb_cogs[file_type]
-        daily_dnb_cloudmask_blob_path = None
         remote_dnb_file = remote_dnb_files[file_type][0]
         if force_processing:
             will_download = force_processing
@@ -388,12 +470,16 @@ async def process_nighttime_data(date: datetime.date = None,
                     raise Exception('\n'.join(m))
 
             ################### preprocess DNB ########################
+
             down_dnb_file = downloaded_dnb_files[file_type]
 
-            preproc_dnb_file=preprocess_dnb(src_path=down_dnb_file,
-                            timeout_event=timeout_event
-                           )
+            preproc_dnb_file=preprocess_dnb_bbox(src_path=down_dnb_file,
+                                                 timeout_event=timeout_event,
+                                                 lonmin=lonmin, latmin=latmin, lonmax=lonmax, latmax=latmax
+                                                 )
+
             downloaded_dnb_files[file_type] = preproc_dnb_file
+
             ################### convert to COG ########################
             if concurrent:
                 convert2cogtasks = list()
@@ -422,14 +508,14 @@ async def process_nighttime_data(date: datetime.date = None,
                     error_message = f'Failed to convert {list(downloaded_dnb_files.values())} to COG in {CONVERT_TIMEOUT} seconds.'
                     logger.error(error_message)
                     timeout_event.set()
-
+                pm = []
                 for pending_future in pending:
                     try:
                         pending_future.cancel()
                         await pending_future
                     except asyncio.exceptions.CancelledError as e:
-                        raise
-
+                        pm.append(str(e))
+                dm = []
                 for done_future in done:
                     try:
                         converted_cog_path = await done_future
@@ -438,19 +524,27 @@ async def process_nighttime_data(date: datetime.date = None,
                         local_cog_files[dnb_file_type] = converted_cog_path
 
                     except Exception as e:
-                        raise
+                        dm.append(str(e))
+                if pm:raise Exception('\n'.join(pm))
+                if dm:raise Exception('\n'.join(dm))
             else:
-                for dnb_file_type, downloaded_dnb_file in downloaded_dnb_files.items():
-                    local_cog_file = os.path.splitext(downloaded_dnb_file)[0]
-                    _, dnb_file_desc = remote_dnb_files[dnb_file_type]
-                    converted_cog_path = warp_cog(
-                        src_path = downloaded_dnb_file,
-                        dst_path = local_cog_file,
-                        timeout_event = timeout_event,
-                        description = dnb_file_desc,
-                        lonmin = lonmin, latmin = latmin, lonmax = lonmax, latmax = latmax
-                    )
-                    local_cog_files[dnb_file_type] = converted_cog_path
+                try:
+                    for dnb_file_type, downloaded_dnb_file in downloaded_dnb_files.items():
+                        local_cog_file = os.path.splitext(downloaded_dnb_file)[0]
+                        _, dnb_file_desc = remote_dnb_files[dnb_file_type]
+                        converted_cog_path = warp_cog(
+                            src_path = downloaded_dnb_file,
+                            dst_path = local_cog_file,
+                            timeout_event = timeout_event,
+                            description = dnb_file_desc,
+                            lonmin = lonmin, latmin = latmin, lonmax = lonmax, latmax = latmax
+                        )
+                        local_cog_files[dnb_file_type] = converted_cog_path
+                except Exception as eee:
+                    if 'user terminated' in str(eee):
+                        raise KeyboardInterrupt
+                    else:
+                        raise eee
 
             ################### upload to azure########################
             for dnb_file_type, local_cog_file in local_cog_files.items():
@@ -468,17 +562,17 @@ async def process_nighttime_data(date: datetime.date = None,
         else:
             logger.info(f'No nighttime lights data will be processed for {date} from Colorado EOG ')
 
-
     except asyncio.CancelledError as ce:
         logger.info(f'Cancelling all tasks and actions...')
         timeout_event.set()
-        if archive:raise
+        raise ce
 
     except Exception as e:
-
+        timeout_event.set()
         logger.error(f"Failed to process data for {date.strftime('%Y-%m-%d')}: {e.__class__.__name__} {e} ")
-        raise
+        if 'user terminated' in str(e).lower():
+            raise KeyboardInterrupt
+        else:
+            raise e
 
 
-
-start = datetime.datetime.now()
