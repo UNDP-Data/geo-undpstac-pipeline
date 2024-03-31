@@ -558,6 +558,15 @@ async def process_nighttime_data(date: datetime.date = None,
                 azure_cog_files=azure_dnb_cogs,
                 file_type=file_type
             )
+            if archive:
+                for ftype, fpath in downloaded_dnb_files.items():
+                    logger.info(f'removing {fpath}')
+                    os.remove(fpath)
+                logger.info(f'removing {down_dnb_file}')
+                os.remove(down_dnb_file)
+                for ftype, fpath in local_cog_files.items():
+                    logger.info(f'removing {fpath}')
+                    os.remove(fpath)
 
         else:
             logger.info(f'No nighttime lights data will be processed for {date} from Colorado EOG ')
