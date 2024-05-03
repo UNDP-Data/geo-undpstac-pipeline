@@ -61,6 +61,7 @@ This is the easiest and preferred way
         pipenv --python 3 # this will create a virt env using default python interpreter
         pipenv run pip  install GDAL=`gdalinfo --version | cut -c 6-10`
         pipenv run pip install -r requirements.txt
+        pipenv run python -m undpstac_pipeline.cli --help
 ```
 
 
