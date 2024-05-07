@@ -6,6 +6,8 @@ import asyncio
 
 import sys
 from undpstac_pipeline.acore import process_nighttime_data
+from undpstac_pipeline.queue import fetch_message_from_queue
+
 
 async def main():
     logging.basicConfig()
@@ -65,6 +67,18 @@ async def main():
     archive_parser.add_argument('-l', '--log-level', help='Set log level ', type=str, choices=['INFO', 'DEBUG', 'TRACE'],
                               default='INFO')
 
+    busqueue_parser = subparsers.add_parser(
+        name="queue",
+        help="Run the pipeline in service bus queue mode",
+        description="Pull a message from the service bus queue to ingest a day of data",
+        usage="python -m undpstac_pipeline.cli queue"
+    )
+    busqueue_parser.add_argument('-f', '--force', type=bool, action=argparse.BooleanOptionalAction,
+                                help='Ignore exiting COG and process again', required=False)
+    busqueue_parser.add_argument('-l', '--log-level', help='Set log level ', type=str,
+                                choices=['INFO', 'DEBUG', 'TRACE'],
+                                default='INFO')
+
     args = parser.parse_args(args=None if sys.argv[1:] else ['--help'])
     if args.log_level:
         logger.setLevel(args.log_level)
@@ -91,7 +105,15 @@ async def main():
             await process_nighttime_data(date=day,
                                          lonmin=args.lonmin, latmin=args.latmin, lonmax=args.lonmax, latmax=args.latmax,
                                          force_processing=args.force, archive=True)
-
+    if args.mode == 'queue':
+        servicebus_conn_str = os.environ.get('AZURE_SERVICE_BUS_CONNECTION_STRING')
+        servicebus_queue_name = os.environ.get('AZURE_SERVICE_BUS_QUEUE_NAME')
+        days = await fetch_message_from_queue(servicebus_queue_name, servicebus_conn_str)
+        for day in days:
+            logger.info(f"Start processing {str(day)}")
+            await process_nighttime_data(
+                date=day,
+                force_processing=args.force)
 
 def run_pipeline():
     logger = logging.getLogger(__name__)
