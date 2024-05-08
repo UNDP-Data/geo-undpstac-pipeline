@@ -42,7 +42,8 @@ This is the easiest and preferred way
    docker-compose run pipeline python3 -m undpstac_pipeline.cli daily --help
    # run the pipeline for a given day
    docker-compose run pipeline python3 -m undpstac_pipeline.cli daily -y 2024 -m 2 -d 20  -f
-   
+   # fetch a message (yyyyMMdd string text) from service bus queue to process a day
+   docker-compose run pipeline python3 -m undpstac_pipeline.cli queue -h
 ```
 
 
@@ -63,7 +64,6 @@ This is the easiest and preferred way
         pipenv run pip install -r requirements.txt
         pipenv run python -m undpstac_pipeline.cli --help
 ```
-
 
 ### Deployment to ACI
 

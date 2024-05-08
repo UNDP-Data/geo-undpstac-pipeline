@@ -6,3 +6,4 @@ python-dotenv
 tqdm
 pystac
 aiofiles
+azure-servicebus
