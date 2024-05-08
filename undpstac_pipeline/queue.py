@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import re
 from datetime import datetime
 from io import StringIO
 from traceback import print_exc
@@ -8,6 +9,41 @@ from traceback import print_exc
 from azure.servicebus.aio import ServiceBusClient
 
 logger = logging.getLogger(__name__)
+
+acceptable_types = [
+    "nighttime"
+]
+
+def check_date_format(date_string):
+    """
+    check date format to ensure it is a valid datetime
+    """
+    try:
+        datetime.strptime(date_string, '%Y%m%d')
+        return True
+    except ValueError:
+        return False
+
+def validate_message(msg):
+    """
+    validate message from queue
+    a message should be following the format of "{typeName},yyyyMMdd"
+    typeName is a data name which want to ingest.
+    yyyyMMdd is a date which will be processed.
+
+    For example, "nighttime,20240201"
+    """
+    pattern = r'^[a-zA-Z0-9]+,\d{8}$'
+    if re.match(pattern, msg):
+        split_parts = msg.split(',')
+        type_name = split_parts[0]
+        if type_name not in acceptable_types:
+            return False
+
+        date_string = split_parts[1]
+        return check_date_format(date_string)
+    else:
+        return False
 
 async def fetch_message_from_queue(
         quene_name,
@@ -29,10 +65,29 @@ async def fetch_message_from_queue(
                     )
                     if received_msgs:
                         for msg in received_msgs:
-                            msg_str = json.loads(str(msg))
+                            msg_str = str(msg)
+                            if not validate_message(msg_str):
+                                logger.info(f"Pushing {msg} to dead-letter sub-queue")
+
+                                await receiver.dead_letter_message(
+                                    msg, reason="message does not follow specification"
+                                )
+                                continue
+
                             logger.info( f"Received message: {msg_str} from queue")
-                            target_date = datetime.strptime(str(msg_str), '%Y%m%d')
-                            messages.append(target_date)
+
+                            parts = msg_str.split(',')
+                            type_name = parts[0]
+                            date_string = parts[1]
+
+                            target_date = datetime.strptime(date_string, '%Y%m%d')
+
+                            res = {
+                                "type": type_name,
+                                "date": target_date
+                            }
+
+                            messages.append(res)
                             # complete the message so that the message is removed from the queue
                             await receiver.complete_message(msg)
     return messages

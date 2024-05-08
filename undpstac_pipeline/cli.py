@@ -70,7 +70,9 @@ async def main():
     busqueue_parser = subparsers.add_parser(
         name="queue",
         help="Run the pipeline in service bus queue mode",
-        description="Pull a message from the service bus queue to ingest a day of data",
+        description="Pull a message from the service bus queue to ingest a day of data. \
+        A message must be added into service bus queue by following the format of 'type_name,yyyyMMdd'. \
+        e.g., 'nighttime,20240201'",
         usage="python -m undpstac_pipeline.cli queue"
     )
     busqueue_parser.add_argument('-f', '--force', type=bool, action=argparse.BooleanOptionalAction,
@@ -108,12 +110,17 @@ async def main():
     if args.mode == 'queue':
         servicebus_conn_str = os.environ.get('AZURE_SERVICE_BUS_CONNECTION_STRING')
         servicebus_queue_name = os.environ.get('AZURE_SERVICE_BUS_QUEUE_NAME')
-        days = await fetch_message_from_queue(servicebus_queue_name, servicebus_conn_str)
-        for day in days:
-            logger.info(f"Start processing {str(day)}")
-            await process_nighttime_data(
-                date=day,
-                force_processing=args.force)
+        messages = await fetch_message_from_queue(servicebus_queue_name, servicebus_conn_str)
+        for msg in messages:
+            day = msg["date"]
+            date_type = msg["type"]
+            logger.info(f"Start processing {str(day)} for {date_type}")
+
+            if date_type == "nighttime":
+                await process_nighttime_data(
+                    date=day,
+                    force_processing=args.force)
+
 
 def run_pipeline():
     logger = logging.getLogger(__name__)
