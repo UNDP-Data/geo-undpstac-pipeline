@@ -2,9 +2,11 @@ name: Create and publish a Docker image
 
 on:
   push:
-    branches: [ "main" ]
+    branches:
+      - "main"
+    tags:
+      - "v*"
   pull_request:
-    branches: [ "main" ]
 
 env:
   IMAGE_NAME: ${{ github.repository}}
@@ -32,7 +34,7 @@ jobs:
     - name: Build and push
       uses: docker/build-push-action@v5
       with:
-        push: true
+        push: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')}}
         context: .
         file: Dockerfile
         tags: ${{ steps.meta.outputs.tags }}
