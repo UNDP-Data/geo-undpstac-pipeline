@@ -1,10 +1,6 @@
-import asyncio
-import json
 import logging
 import re
 from datetime import datetime
-from io import StringIO
-from traceback import print_exc
 
 from azure.servicebus.aio import ServiceBusClient
 
