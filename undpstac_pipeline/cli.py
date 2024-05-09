@@ -8,6 +8,16 @@ import sys
 from undpstac_pipeline.acore import process_nighttime_data
 from undpstac_pipeline.queue import fetch_message_from_queue
 
+def addCommonArguments(parser):
+    parser.add_argument('--lonmin', type=float, help='The western bound', required=False, default=-180)
+    parser.add_argument('--latmin', type=float, help='The southern bound', required=False, default=-65)
+    parser.add_argument('--lonmax', type=float, help='The eastern bound', required=False, default=180)
+    parser.add_argument('--latmax', type=float, help='The northern bound', required=False, default=75)
+
+    parser.add_argument('-f', '--force', type=bool, action=argparse.BooleanOptionalAction,
+                              help='Ignore exiting COG and process again', required=False)
+    parser.add_argument('-l', '--log-level', help='Set log level ', type=str, choices=['INFO', 'DEBUG', 'TRACE'],
+                              default='INFO')
 
 async def main():
     logging.basicConfig()
@@ -38,15 +48,7 @@ async def main():
     daily_parser.add_argument( '-y', '--year', type=int, help='The year of the data to download', required=False)
     daily_parser.add_argument('-m', '--month', type=int, help='The month of the data to download', required=False)
     daily_parser.add_argument('-d', '--day' , type=int, help='The day of the data to download', required=False)
-    #lonmin=-180, latmin=-65, lonmax=180, latmax=75
-    daily_parser.add_argument( '--lonmin' , type=float, help='The western bound', required=False, default=-180)
-    daily_parser.add_argument( '--latmin' , type=float, help='The southern bound', required=False, default=-65)
-    daily_parser.add_argument( '--lonmax' , type=float, help='The eastern bound', required=False, default=180)
-    daily_parser.add_argument( '--latmax' , type=float, help='The northern bound', required=False, default=75)
-
-    daily_parser.add_argument('-f', '--force' , type=bool, action=argparse.BooleanOptionalAction, help='Ignore exiting COG and process again', required=False)
-    daily_parser.add_argument('-l', '--log-level', help='Set log level ', type=str, choices=['INFO', 'DEBUG', 'TRACE'],
-                        default='INFO')
+    addCommonArguments(daily_parser)
 
 
     archive_parser = subparsers.add_parser(name='archive', help='Run the pipeline in archive mode',
@@ -56,16 +58,7 @@ async def main():
                                 help='The start date from where the pipeline will start processing the VIIRS DNB mosaics')
     archive_parser.add_argument('-e', '--end-date', type=lambda d: datetime.datetime.strptime(d, '%Y-%m-%d').date(), required=True,
                                 help='The end date signalizing the last day for which the VIIRS DNB mosaics will be processed')
-    archive_parser.add_argument('--lonmin', type=float, help='The western bound', required=False, default=-180)
-    archive_parser.add_argument('--latmin', type=float, help='The southern bound', required=False, default=-65)
-    archive_parser.add_argument('--lonmax', type=float, help='The eastern bound', required=False, default=180)
-    archive_parser.add_argument('--latmax', type=float, help='The northern bound', required=False, default=75)
-
-
-    archive_parser.add_argument('-f', '--force', type=bool, action=argparse.BooleanOptionalAction,
-                              help='Ignore exiting COG and process again', required=False)
-    archive_parser.add_argument('-l', '--log-level', help='Set log level ', type=str, choices=['INFO', 'DEBUG', 'TRACE'],
-                              default='INFO')
+    addCommonArguments(archive_parser)
 
     busqueue_parser = subparsers.add_parser(
         name="queue",
@@ -75,11 +68,7 @@ async def main():
         e.g., 'nighttime,20240201'",
         usage="python -m undpstac_pipeline.cli queue"
     )
-    busqueue_parser.add_argument('-f', '--force', type=bool, action=argparse.BooleanOptionalAction,
-                                help='Ignore exiting COG and process again', required=False)
-    busqueue_parser.add_argument('-l', '--log-level', help='Set log level ', type=str,
-                                choices=['INFO', 'DEBUG', 'TRACE'],
-                                default='INFO')
+    addCommonArguments(busqueue_parser)
 
     args = parser.parse_args(args=None if sys.argv[1:] else ['--help'])
     if args.log_level:
@@ -119,6 +108,7 @@ async def main():
             if date_type == "nighttime":
                 await process_nighttime_data(
                     date=day,
+                    lonmin=args.lonmin, latmin=args.latmin, lonmax=args.lonmax, latmax=args.latmax,
                     force_processing=args.force)
 
 
