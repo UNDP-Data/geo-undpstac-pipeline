@@ -1,8 +1,8 @@
 import logging
 import re
 from datetime import datetime
-
 from azure.servicebus.aio import ServiceBusClient
+from undpstac_pipeline.acore import process_nighttime_data
 
 logger = logging.getLogger(__name__)
 
@@ -41,11 +41,20 @@ def validate_message(msg):
     else:
         return False
 
-async def fetch_message_from_queue(
-        quene_name,
-        connection_string,
-):
-    messages = []
+async def process_message_from_queue(quene_name: str,
+                                     connection_string: str,
+                                     lonmin: float = None,
+                                     latmin: float = None,
+                                     lonmax: float = None,
+                                     latmax: float = None,
+                                     force_processing: bool=False,
+                                     ):
+    """
+    This funciton fetch a message from service bus queue to process a day's data for UNDP STAC
+    :param quene_name: queue name of Azure Service Bus
+    :param connection_string: Azure Service Bus connection string
+    :return: void
+    """
 
     # create a Service Bus client using the connection string
     async with ServiceBusClient.from_connection_string(
@@ -53,37 +62,43 @@ async def fetch_message_from_queue(
             logging_enable=True) as servicebus_client:
         async with servicebus_client:
             # get the Queue Receiver object for the queue
-            receiver = servicebus_client.get_queue_receiver(queue_name=quene_name)
-            async with receiver:
-                    received_msgs = await receiver.receive_messages(
-                        max_message_count=1,
-                        max_wait_time=5,
-                    )
-                    if received_msgs:
-                        for msg in received_msgs:
-                            msg_str = str(msg)
-                            if not validate_message(msg_str):
-                                logger.info(f"Pushing {msg} to dead-letter sub-queue")
+            async with servicebus_client.get_queue_receiver(queue_name=quene_name) as receiver:
+                received_msgs = await receiver.receive_messages(
+                    max_message_count=1,
+                    max_wait_time=5,
+                )
+                if not received_msgs:
+                    logger.info("No message in the queue.")
+                else:
+                    for msg in received_msgs:
+                        msg_str = str(msg)
+                        if not validate_message(msg_str):
+                            logger.info(f"Pushing {msg} to dead-letter sub-queue")
+                            await receiver.dead_letter_message(
+                                msg, reason="message does not follow specification"
+                            )
+                            continue
 
-                                await receiver.dead_letter_message(
-                                    msg, reason="message does not follow specification"
-                                )
-                                continue
+                        logger.info( f"Received message: {msg_str} from queue")
 
-                            logger.info( f"Received message: {msg_str} from queue")
+                        parts = msg_str.split(',')
+                        type_name = parts[0]
+                        date_string = parts[1]
 
-                            parts = msg_str.split(',')
-                            type_name = parts[0]
-                            date_string = parts[1]
+                        target_date = datetime.strptime(date_string, '%Y%m%d')
 
-                            target_date = datetime.strptime(date_string, '%Y%m%d')
-
-                            res = {
-                                "type": type_name,
-                                "date": target_date
-                            }
-
-                            messages.append(res)
-                            # complete the message so that the message is removed from the queue
+                        if type_name == "nighttime":
+                            # flag message as completed since it cannot be locked for long time
                             await receiver.complete_message(msg)
-    return messages
+                            logger.info(f"Start processing {str(target_date)} for {type_name}")
+                            await process_nighttime_data(
+                                date=target_date,
+                                lonmin=lonmin, latmin=latmin, lonmax=lonmax, latmax=latmax,
+                                force_processing=force_processing)
+                            logger.info(f"Completed processing {str(target_date)} for å{type_name}")
+                        else:
+                            logger.info(f"Pushing {msg} to dead-letter sub-queue")
+                            await receiver.dead_letter_message(
+                                msg, reason=f"invalid data type of {type_name}"
+                            )
+                            continue

@@ -6,7 +6,8 @@ import asyncio
 
 import sys
 from undpstac_pipeline.acore import process_nighttime_data
-from undpstac_pipeline.queue import fetch_message_from_queue
+from undpstac_pipeline.queue import process_message_from_queue
+
 
 def addCommonArguments(parser):
     parser.add_argument('--lonmin', type=float, help='The western bound', required=False, default=-180)
@@ -99,18 +100,9 @@ async def main():
     if args.mode == 'queue':
         servicebus_conn_str = os.environ.get('AZURE_SERVICE_BUS_CONNECTION_STRING')
         servicebus_queue_name = os.environ.get('AZURE_SERVICE_BUS_QUEUE_NAME')
-        messages = await fetch_message_from_queue(servicebus_queue_name, servicebus_conn_str)
-        for msg in messages:
-            day = msg["date"]
-            date_type = msg["type"]
-            logger.info(f"Start processing {str(day)} for {date_type}")
-
-            if date_type == "nighttime":
-                await process_nighttime_data(
-                    date=day,
-                    lonmin=args.lonmin, latmin=args.latmin, lonmax=args.lonmax, latmax=args.latmax,
-                    force_processing=args.force)
-
+        await process_message_from_queue(servicebus_queue_name, servicebus_conn_str,
+                                        lonmin=args.lonmin, latmin=args.latmin, lonmax=args.lonmax, latmax=args.latmax,
+                                        force_processing=args.force)
 
 def run_pipeline():
     logger = logging.getLogger(__name__)
