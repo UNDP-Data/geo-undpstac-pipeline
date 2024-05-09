@@ -109,4 +109,39 @@ type: Microsoft.ContainerInstance/containerGroups
     
 ```
 
+## Registering message into the queue
 
+```commandline
+docker-compose run pipeline python3 -m queue_register.cli -h                    
+usage: cli.py [-h] {daily,archive,yesterday} ...
+
+Register queue message to service bus queue
+
+positional arguments:
+  {daily,archive,yesterday}
+                        main modes of operation
+    daily               Register a day of message into the queue
+    archive             Register a range of days into the queue
+    yesterday           Register yesterday of message into the queue
+
+options:
+  -h, --help            show this help message and exit
+```
+
+- register a day
+
+```commandline
+python -m queue_register.cli daily -t=nighttime -d=2024-01-25
+```
+
+- register a range of days
+
+```commandline
+python -m queue_register.cli archive -t=nighttime -s=2023-01-01 -e=2023-03-31
+```
+
+- register yesterday
+
+```commandline
+python -m queue_register.cli yesterday -t=nighttime
+```
