@@ -10,7 +10,8 @@ import logging
 CONNECTION_STRING = os.environ.get('AZURE_SERVICE_BUS_CONNECTION_STRING')
 QUEUE_NAME = os.environ.get('AZURE_SERVICE_BUS_QUEUE_NAME')
 
-async def send_message(type, days):
+
+async def send_message(data_type, days, force_processing=False):
     async with ServiceBusClient.from_connection_string(
             conn_str=CONNECTION_STRING,
             logging_enable=True) as servicebus_client:
@@ -19,9 +20,11 @@ async def send_message(type, days):
         async with sender:
             batch_message = await sender.create_message_batch()
             for day in days:
-                formattedDay = day.strftime('%Y%m%d')
+                formatted_day = day.strftime('%Y%m%d')
                 try:
-                    message = f"{type},{formattedDay}"
+                    message = f"{data_type},{formatted_day}"
+                    if force_processing:
+                        message = f"{message},force"
                     logger.info(f"Add message: {message}")
                     batch_message.add_message(ServiceBusMessage(message))
                 except ValueError:
@@ -65,6 +68,8 @@ async def main():
     daily_parser.add_argument('-d', '--day', type=lambda d: datetime.datetime.strptime(d, '%Y-%m-%d').date(),
                               required=True,
                               help='The date where the pipeline will process')
+    daily_parser.add_argument('-f', '--force', type=bool, action=argparse.BooleanOptionalAction,
+                              help='Ignore exiting COG and process again', required=False)
 
     archive_parser = subparsers.add_parser(name='archive', help='Register a range of days into the queue',
                                            description='Run the pipeline for every day in a given time interval defined by two dates',
@@ -79,22 +84,29 @@ async def main():
     archive_parser.add_argument('-e', '--end-date', type=lambda d: datetime.datetime.strptime(d, '%Y-%m-%d').date(),
                                 required=True,
                                 help='The end date signalizing the last day will be processed')
+    archive_parser.add_argument('-f', '--force', type=bool, action=argparse.BooleanOptionalAction,
+                                help='Ignore exiting COG and process again', required=False)
 
     yesterday_parser = subparsers.add_parser(name='yesterday',
-                                              help='Register yesterday of message into the queue',
-                                              description='Run the pipeline for yesterday',
-                                              usage='python -m queue_register.cli yesterday -t=nighttime')
+                                             help='Register yesterday of message into the queue',
+                                             description='Run the pipeline for yesterday',
+                                             usage='python -m queue_register.cli yesterday -t=nighttime')
     yesterday_parser.add_argument('-t', '--type', type=str,
-                                   required=True,
-                                   help='Processed data type, e.g., nighttime',
-                                   default="nighttime")
+                                  required=True,
+                                  help='Processed data type, e.g., nighttime',
+                                  default="nighttime")
+    yesterday_parser.add_argument('-f', '--force', type=bool, action=argparse.BooleanOptionalAction,
+                                  help='Ignore exiting COG and process again', required=False)
 
     args = parser.parse_args(args=None if sys.argv[1:] else ['--help'])
 
-    dataType = args.type
+    if args.log_level:
+        logger.setLevel(args.log_level)
+
+    data_type = args.type
     if args.mode == 'daily':
         day = args.day
-        await send_message(dataType, [day])
+        await send_message(data_type, [day], args.force)
     elif args.mode == 'archive':
         start_date = args.start_date
         end_date = args.end_date
@@ -103,12 +115,13 @@ async def main():
         for i in range(delta.days + 1):
             day = start_date + datetime.timedelta(days=i)
             days.append(day)
-        await send_message(dataType, days)
+        await send_message(data_type, days, args.force)
     elif args.mode == 'yesterday':
         yesterday = datetime.datetime.now().date() - datetime.timedelta(days=1)
-        await send_message(dataType, [yesterday])
+        await send_message(data_type, [yesterday], args.force)
     else:
         pass
+
 
 if __name__ == '__main__':
     logger = logging.getLogger(__name__)

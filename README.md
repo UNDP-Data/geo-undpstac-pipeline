@@ -145,3 +145,5 @@ python -m queue_register.cli archive -t=nighttime -s=2023-01-01 -e=2023-03-31
 ```commandline
 python -m queue_register.cli yesterday -t=nighttime
 ```
+
+If you wish to push data to overwrite existing data in storage account, use `-f` option. `queue_register.cli` will push a message with force processing option like `nighttime,20240101,force`. As default, force processing is disabled.
