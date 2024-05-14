@@ -113,16 +113,17 @@ type: Microsoft.ContainerInstance/containerGroups
 
 ```commandline
 docker-compose run pipeline python3 -m queue_register.cli -h                    
-usage: cli.py [-h] {daily,archive,yesterday} ...
+usage: cli.py [-h] {daily,archive,yesterday,recent} ...
 
 Register queue message to service bus queue
 
 positional arguments:
-  {daily,archive,yesterday}
+  {daily,archive,yesterday,recent}
                         main modes of operation
     daily               Register a day of message into the queue
     archive             Register a range of days into the queue
     yesterday           Register yesterday of message into the queue
+    recent              Register recent N days of message into the queue
 
 options:
   -h, --help            show this help message and exit
@@ -144,6 +145,14 @@ python -m queue_register.cli archive -t=nighttime -s=2023-01-01 -e=2023-03-31
 
 ```commandline
 python -m queue_register.cli yesterday -t=nighttime
+```
+
+- recent N days
+
+The recent N days until yesterday will be added into the queue
+
+```commandline
+python -m queue_register.cli recent -t=nighttime -n=5
 ```
 
 If you wish to push data to overwrite existing data in storage account, use `-f` option. `queue_register.cli` will push a message with force processing option like `nighttime,20240101,force`. As default, force processing is disabled.
