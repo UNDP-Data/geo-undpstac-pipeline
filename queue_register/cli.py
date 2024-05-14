@@ -35,6 +35,11 @@ async def send_message(data_type, days, force_processing=False):
             await sender.send_messages(batch_message)
             logger.info(f"Sent {len(days)} messages into the queue.")
 
+def addCommonArguments(parser):
+    parser.add_argument('-f', '--force', type=bool, action=argparse.BooleanOptionalAction,
+                              help='Ignore exiting COG and process again', required=False)
+    parser.add_argument('-l', '--log-level', help='Set log level ', type=str, choices=['INFO', 'DEBUG', 'TRACE'],
+                              default='INFO')
 
 async def main():
     logging.basicConfig()
@@ -68,8 +73,7 @@ async def main():
     daily_parser.add_argument('-d', '--day', type=lambda d: datetime.datetime.strptime(d, '%Y-%m-%d').date(),
                               required=True,
                               help='The date where the pipeline will process')
-    daily_parser.add_argument('-f', '--force', type=bool, action=argparse.BooleanOptionalAction,
-                              help='Ignore exiting COG and process again', required=False)
+    addCommonArguments(daily_parser)
 
     archive_parser = subparsers.add_parser(name='archive', help='Register a range of days into the queue',
                                            description='Run the pipeline for every day in a given time interval defined by two dates',
@@ -84,8 +88,7 @@ async def main():
     archive_parser.add_argument('-e', '--end-date', type=lambda d: datetime.datetime.strptime(d, '%Y-%m-%d').date(),
                                 required=True,
                                 help='The end date signalizing the last day will be processed')
-    archive_parser.add_argument('-f', '--force', type=bool, action=argparse.BooleanOptionalAction,
-                                help='Ignore exiting COG and process again', required=False)
+    addCommonArguments(archive_parser)
 
     yesterday_parser = subparsers.add_parser(name='yesterday',
                                              help='Register yesterday of message into the queue',
@@ -95,8 +98,7 @@ async def main():
                                   required=True,
                                   help='Processed data type, e.g., nighttime',
                                   default="nighttime")
-    yesterday_parser.add_argument('-f', '--force', type=bool, action=argparse.BooleanOptionalAction,
-                                  help='Ignore exiting COG and process again', required=False)
+    addCommonArguments(yesterday_parser)
 
     args = parser.parse_args(args=None if sys.argv[1:] else ['--help'])
 
