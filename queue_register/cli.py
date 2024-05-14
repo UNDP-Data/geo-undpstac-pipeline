@@ -36,6 +36,10 @@ async def send_message(data_type, days, force_processing=False):
             logger.info(f"Sent {len(days)} messages into the queue.")
 
 def addCommonArguments(parser):
+    parser.add_argument('-t', '--type', type=str,
+                              required=True,
+                              help='Processed data type, e.g., nighttime',
+                              default="nighttime")
     parser.add_argument('-f', '--force', type=bool, action=argparse.BooleanOptionalAction,
                               help='Ignore exiting COG and process again', required=False)
     parser.add_argument('-l', '--log-level', help='Set log level ', type=str, choices=['INFO', 'DEBUG', 'TRACE'],
@@ -66,10 +70,7 @@ async def main():
                                          help='Register a day of message into the queue',
                                          description='Run the pipeline for a specified day by registering to the queue',
                                          usage='python -m queue_register.cli daily -t=nighttime -d=2024-01-25')
-    daily_parser.add_argument('-t', '--type', type=str,
-                              required=True,
-                              help='Processed data type, e.g., nighttime',
-                              default="nighttime")
+
     daily_parser.add_argument('-d', '--day', type=lambda d: datetime.datetime.strptime(d, '%Y-%m-%d').date(),
                               required=True,
                               help='The date where the pipeline will process')
@@ -78,10 +79,6 @@ async def main():
     archive_parser = subparsers.add_parser(name='archive', help='Register a range of days into the queue',
                                            description='Run the pipeline for every day in a given time interval defined by two dates',
                                            usage='python -m queue_register.cli archive -t=nighttime -s=2023-01-01 -e=2023-03-31')
-    archive_parser.add_argument('-t', '--type', type=str,
-                                required=True,
-                                help='Processed data type, e.g., nighttime',
-                                default="nighttime")
     archive_parser.add_argument('-s', '--start-date', type=lambda d: datetime.datetime.strptime(d, '%Y-%m-%d').date(),
                                 required=True,
                                 help='The start date from where the pipeline will start processing')
@@ -94,11 +91,17 @@ async def main():
                                              help='Register yesterday of message into the queue',
                                              description='Run the pipeline for yesterday',
                                              usage='python -m queue_register.cli yesterday -t=nighttime')
-    yesterday_parser.add_argument('-t', '--type', type=str,
-                                  required=True,
-                                  help='Processed data type, e.g., nighttime',
-                                  default="nighttime")
     addCommonArguments(yesterday_parser)
+
+    recent_parser = subparsers.add_parser(name='recent',
+                                          help='Register recent N days of message into the queue',
+                                          description='Run the pipeline for the recent N days. If 5 is set to -n, '
+                                                      'total 5 days til yesterday are processed.',
+                                          usage='python -m queue_register.cli recent -n=4')
+    recent_parser.add_argument('-n', '--number', type=int,
+                                  required=True,
+                                  help='The number of days before today to processed')
+    addCommonArguments(recent_parser)
 
     args = parser.parse_args(args=None if sys.argv[1:] else ['--help'])
 
@@ -121,6 +124,19 @@ async def main():
     elif args.mode == 'yesterday':
         yesterday = datetime.datetime.now().date() - datetime.timedelta(days=1)
         await send_message(data_type, [yesterday], args.force)
+    elif args.mode == 'recent':
+        n_days = int(args.number)
+        if n_days < 1:
+            raise argparse.ArgumentTypeError("-n/--number must be greater than zero.")
+
+        yesterday = datetime.datetime.now().date() - datetime.timedelta(days=1)
+        start_date = yesterday - datetime.timedelta(days=n_days - 1)
+        delta = yesterday - start_date  # returns timedelta
+        days = []
+        for i in range(delta.days + 1):
+            day = start_date + datetime.timedelta(days=i)
+            days.append(day)
+        await send_message(data_type, days, args.force)
     else:
         pass
 
