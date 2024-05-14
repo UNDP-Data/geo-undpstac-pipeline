@@ -27,9 +27,9 @@ def validate_message(msg):
     typeName is a data name which want to ingest.
     yyyyMMdd is a date which will be processed.
 
-    For example, "nighttime,20240201"
+    For example, "nighttime,20240201", "nighttime,20240201,force"
     """
-    pattern = r'^[a-zA-Z0-9]+,\d{8}$'
+    pattern = r'^[a-zA-Z0-9]+,\d{8}(,force)?$'
     if re.match(pattern, msg):
         split_parts = msg.split(',')
         type_name = split_parts[0]
@@ -84,6 +84,13 @@ async def process_message_from_queue(quene_name: str,
                         parts = msg_str.split(',')
                         type_name = parts[0]
                         date_string = parts[1]
+                        is_force = False
+                        if force_processing is not None:
+                            is_force = force_processing
+                        # overwrite force_processing state if the third option in queue message is set to force.
+                        elif len(parts) == 3:
+                            force_string = parts[2]
+                            is_force = force_string == 'force'
 
                         target_date = datetime.strptime(date_string, '%Y%m%d')
 
@@ -94,7 +101,7 @@ async def process_message_from_queue(quene_name: str,
                             await process_nighttime_data(
                                 date=target_date,
                                 lonmin=lonmin, latmin=latmin, lonmax=lonmax, latmax=latmax,
-                                force_processing=force_processing)
+                                force_processing=is_force)
                             logger.info(f"Completed processing {str(target_date)} for å{type_name}")
                         else:
                             logger.info(f"Pushing {msg} to dead-letter sub-queue")
