@@ -2,7 +2,6 @@ import os
 from azure.storage.blob import BlobServiceClient, ContentSettings, ContainerClient
 from undpstac_pipeline.const import AZURE_CONTAINER_NAME, AZURE_STORAGE_CONNECTION_STRING
 import logging
-import math
 from tqdm import tqdm
 logger = logging.getLogger(__name__)
 

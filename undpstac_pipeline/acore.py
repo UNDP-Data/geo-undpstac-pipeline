@@ -1,7 +1,7 @@
 import multiprocessing
 import asyncio
 import numpy as np
-from undpstac_pipeline.utils import should_download, transform_bbox
+from undpstac_pipeline.utils import should_download, transform_bbox, get_dnb_file_size_from_meta
 from undpstac_pipeline.colorado_eog import get_dnb_files, download_file
 from undpstac_pipeline.const import COG_DNB_FILE_TYPE, AZURE_DNB_COLLECTION_FOLDER, COG_CONVERT_TIMEOUT,AIOHTTP_READ_CHUNKSIZE, COG_DOWNLOAD_TIMEOUT
 import datetime
@@ -11,7 +11,7 @@ import tqdm
 from osgeo import gdal
 from osgeo import gdal_array
 from undpstac_pipeline.validate import validate
-from undpstac_pipeline.azblob import  upload_file_to_blob
+from undpstac_pipeline.azblob import  upload_file_to_blob, blob_exists_in_azure
 from undpstac_pipeline.stac import  push_to_stac
 import math
 gdal.UseExceptions()
@@ -34,16 +34,16 @@ def gdal_callback(complete, message, data):
         return 0
 
 
-def set_metadata(src_path=None, dst_path=None, description=None):
+def set_metadata(src_path=None, dst_path=None, description=None, original_size_bytes=None):
     logger.info(f'Converting {src_path} to COG')
     if os.path.exists(dst_path): os.remove(dst_path)
     logger.info(f'Setting custom metadata ')
-    ctime = datetime.datetime.fromtimestamp(os.path.getctime(src_path)).strftime('%Y%m%d%H%M%S')
+    ctime = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
     src_cog_ds = gdal.OpenEx(src_path, gdal.OF_UPDATE, )
     band = src_cog_ds.GetRasterBand(1)
     dtp = band.DataType
     # COGS do not like to be edited. So adding metadata will BREAK them
-    src_cog_ds.SetMetadata({f'DNB_FILE_SIZE_{ctime}': f'{os.path.getsize(src_path)}'})
+    src_cog_ds.SetMetadata({f'PROCESSING_INFO': f'{ctime}_{original_size_bytes}'})
     band.SetMetadata({'DESCRIPTION': description})
     band.SetMetadata({'Source': 'Colorado School of mines'})
     band.SetMetadata({'Unit': 'nWcm-2sr-1'})
@@ -270,12 +270,12 @@ def gen_blocks(blockxsize=None, blockysize=None, width=None, height=None ):
 
 def warp_cog(
         src_path=None, dst_path=None,
-        timeout_event=None,description=None,
+        timeout_event=None,description=None, original_size_bytes=None,
         lonmin=-180, latmin=-65, lonmax=178, latmax=75
 
     ):
 
-    dtp = set_metadata(src_path=src_path, dst_path=dst_path, description=description)
+    dtp = set_metadata(src_path=src_path, dst_path=dst_path, description=description, original_size_bytes=original_size_bytes)
     with tqdm.tqdm(range(0, 100), desc=f'running gdalwarp on {src_path}', unit_scale=True) as progressbar:
 
         wo = gdal.WarpOptions(
@@ -424,6 +424,7 @@ async def process_nighttime_data(date: datetime.date = None,
             azure_dnb_cogs[k] = os.path.join(AZURE_DNB_COLLECTION_FOLDER,year,month, day, fname)
 
         cog_dnb_blob_path = azure_dnb_cogs[file_type]
+
         remote_dnb_file = remote_dnb_files[file_type][0]
         if force_processing:
             will_download = force_processing
@@ -431,6 +432,9 @@ async def process_nighttime_data(date: datetime.date = None,
             will_download=should_download(blob_name=cog_dnb_blob_path,remote_file_url=remote_dnb_file)
         if will_download:
             logger.info(f'Processing nighttime lights from Colorado EOG for {date}')
+            _, azure_dnb_url = blob_exists_in_azure(cog_dnb_blob_path)
+            remote_dnb_file_size = get_dnb_file_size_from_meta(url=azure_dnb_url)
+
             ################### download from remote  ########################
             download_futures = list()
             for dnb_file_type, remote in remote_dnb_files.items():
@@ -492,6 +496,7 @@ async def process_nighttime_data(date: datetime.date = None,
                                           dst_path=local_cog_file,
                                           timeout_event=timeout_event,
                                           description=dnb_file_desc,
+                                          original_size_bytes=remote_dnb_file_size,
                                           lonmin=lonmin, latmin=latmin, lonmax=lonmax, latmax=latmax
                                           )
                     )
@@ -537,6 +542,7 @@ async def process_nighttime_data(date: datetime.date = None,
                             dst_path = local_cog_file,
                             timeout_event = timeout_event,
                             description = dnb_file_desc,
+                            original_size_bytes=remote_dnb_file_size,
                             lonmin = lonmin, latmin = latmin, lonmax = lonmax, latmax = latmax
                         )
                         local_cog_files[dnb_file_type] = converted_cog_path

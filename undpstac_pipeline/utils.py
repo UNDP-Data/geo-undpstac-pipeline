@@ -34,13 +34,30 @@ def download_http_resurce(url: str=None, save_path: str=None, timeout=(25, 250))
         raise ValueError("Download failed")
     logger.info(f"Downloaded {url} to {save_path}")
 
+def get_dnb_file_size_from_meta(url=None):
+    """
+        Fetch the  original file size from metadata using GDAL Info
+        The file szie and the time it was created is stored in COG metadata item
+        "PROCESSING_INFO"
+    """
 
+    info = gdal.Info(f'/vsicurl/{url}', format='json')
+    metadata = info['metadata']['']
+    pipeline_info = metadata.get('PROCESSING_INFO', None)
+    if not pipeline_info:
+        raise Exception(f"Failed to extract processing info from {url}'s metadata")
+    creation_time, original_size = pipeline_info.split('_')
+
+    return int(original_size)
 
 def fetch_resource_size(url=None):
     response = requests.get(url, stream=True)
     response.raise_for_status()  # raise an exception if the request fails.
     return int(response.headers.get('content-length', 0))
 
+def human_size(bytes, units=[' bytes','KB','MB','GB','TB', 'PB', 'EB']):
+    """ Returns a human readable string representation of bytes """
+    return str(bytes) + units[0] if bytes < 1024 else human_size(bytes>>10, units[1:])
 
 def should_download(blob_name: str=None, remote_file_url: str=None) -> bool:
     blob_exists, url = blob_exists_in_azure(blob_name)
@@ -49,17 +66,9 @@ def should_download(blob_name: str=None, remote_file_url: str=None) -> bool:
     else:
         # remote file size
         remote_size = fetch_resource_size(url=remote_file_url)
-        info = gdal.Info(f'/vsicurl/{url}', format='json')
-        metadata = info['metadata']['']
-        for k, v in metadata.items():
-            if k.startswith('DNB_FILE_SIZE'):
-                prior_size = int(v)
-                break
+        original_size = get_dnb_file_size_from_meta(url=url)
+        return not remote_size == original_size
 
-        if remote_size != prior_size:
-            return True
-        else:
-            return False
 
 
 def get_cog_metadata(blob_path=None):
