@@ -1,7 +1,7 @@
 import multiprocessing
 import asyncio
 import numpy as np
-from undpstac_pipeline.utils import should_download, transform_bbox, get_dnb_file_size_from_meta
+from undpstac_pipeline.utils import should_download, transform_bbox, fetch_resource_size
 from undpstac_pipeline.colorado_eog import get_dnb_files, download_file
 from undpstac_pipeline.const import COG_DNB_FILE_TYPE, AZURE_DNB_COLLECTION_FOLDER, COG_CONVERT_TIMEOUT,AIOHTTP_READ_CHUNKSIZE, COG_DOWNLOAD_TIMEOUT
 import datetime
@@ -38,12 +38,12 @@ def set_metadata(src_path=None, dst_path=None, description=None, original_size_b
     logger.info(f'Converting {src_path} to COG')
     if os.path.exists(dst_path): os.remove(dst_path)
     logger.info(f'Setting custom metadata ')
-    ctime = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
+    #ctime = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
     src_cog_ds = gdal.OpenEx(src_path, gdal.OF_UPDATE, )
     band = src_cog_ds.GetRasterBand(1)
     dtp = band.DataType
     # COGS do not like to be edited. So adding metadata will BREAK them
-    src_cog_ds.SetMetadata({f'PROCESSING_INFO': f'{ctime}_{original_size_bytes}'})
+    #src_cog_ds.SetMetadata({f'PROCESSING_INFO': f'{ctime}_{original_size_bytes}'})
     band.SetMetadata({'DESCRIPTION': description})
     band.SetMetadata({'Source': 'Colorado School of mines'})
     band.SetMetadata({'Unit': 'nWcm-2sr-1'})
@@ -433,7 +433,7 @@ async def process_nighttime_data(date: datetime.date = None,
         if will_download:
             logger.info(f'Processing nighttime lights from Colorado EOG for {date}')
             _, azure_dnb_url = blob_exists_in_azure(cog_dnb_blob_path)
-            remote_dnb_file_size = get_dnb_file_size_from_meta(url=azure_dnb_url)
+            remote_dnb_file_size = fetch_resource_size(remote_dnb_file)
 
             ################### download from remote  ########################
             download_futures = list()
@@ -562,7 +562,8 @@ async def process_nighttime_data(date: datetime.date = None,
             push_to_stac(
                 local_cog_files=local_cog_files,
                 azure_cog_files=azure_dnb_cogs,
-                file_type=file_type
+                file_type=file_type,
+                original_size_bytes=remote_dnb_file_size
             )
             if archive:
                 for ftype, fpath in downloaded_dnb_files.items():

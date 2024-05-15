@@ -53,6 +53,7 @@ def upload_file_to_blob(
                 overwrite=overwrite,
                 content_settings=ContentSettings(content_type=content_type) if content_type else None,
                 max_concurrency=max_concurrency,
+                connection_timeout=300
 
             )
 

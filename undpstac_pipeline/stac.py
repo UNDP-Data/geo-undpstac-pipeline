@@ -94,6 +94,7 @@ def create_dnb_stac_raster_item(
                         azure_cog_files=None,
                         az_stacio=None,
                         file_type=None,
+                        original_size_bytes=None,
 ):
 
     epsg_code, bbox, footprint = u.get_bbox_and_footprint(raster_path=local_cog_files[file_type])
@@ -115,12 +116,14 @@ def create_dnb_stac_raster_item(
         azure_cog_path = azure_cog_files[ftype]
         azure_blob_client = az_stacio.container_client.get_blob_client(blob=azure_cog_path)
         desc = const.DNB_FILE_TYPES_DESC[ftype]
+        extra = dict(original_size_bytes=original_size_bytes) if ftype == file_type else None
         asset = pystac.Asset(
             href=azure_blob_client.url,
             media_type=pystac.MediaType.COG,
             title=f'{const.DNB_FILE_TYPE_NAMES[ftype]}',
             description=f'{desc} from Colorado schools of Mines',
-            roles=[('analytics')]
+            roles=[('analytics')],
+            extra_fields=extra
         )
         raster = RasterExtension.ext(asset, add_if_missing=False)
         info = gdal.Info(local_cog_file_path, format='json')
@@ -255,6 +258,7 @@ def push_to_stac(
         local_cog_files=None,
         azure_cog_files=None,
         file_type=None,
+        original_size_bytes=None,
         collection_folder=const.AZURE_DNB_COLLECTION_FOLDER
     ):
 
@@ -309,6 +313,7 @@ def push_to_stac(
         azure_cog_files=azure_cog_files,
         az_stacio=az_stacio,
         file_type=file_type,
+        original_size_bytes=original_size_bytes
 
     )
     items = monthly_catalog.get_items(item_id)

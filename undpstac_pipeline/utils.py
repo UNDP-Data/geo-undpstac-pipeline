@@ -9,7 +9,7 @@ import logging
 from osgeo import gdal, osr
 from shapely.geometry import Polygon, mapping
 from datetime import timezone
-
+import urllib
 
 logger = logging.getLogger(__name__)
 def download_http_resurce(url: str=None, save_path: str=None, timeout=(25, 250)):
@@ -34,21 +34,22 @@ def download_http_resurce(url: str=None, save_path: str=None, timeout=(25, 250))
         raise ValueError("Download failed")
     logger.info(f"Downloaded {url} to {save_path}")
 
-def get_dnb_file_size_from_meta(url=None):
+def get_dnb_original_file_size(url=None):
     """
         Fetch the  original file size from metadata using GDAL Info
         The file szie and the time it was created is stored in COG metadata item
         "PROCESSING_INFO"
     """
-
-    info = gdal.Info(f'/vsicurl/{url}', format='json')
-    metadata = info['metadata']['']
-    pipeline_info = metadata.get('PROCESSING_INFO', None)
-    if not pipeline_info:
-        raise Exception(f"Failed to extract processing info from {url}'s metadata")
-    creation_time, original_size = pipeline_info.split('_')
-
-    return int(original_size)
+    parse_res = urllib.parse.urlparse(url)
+    item_root_url = parse_res.path.split('.')[0]
+    item_path = f'{item_root_url}.json'
+    item_url = f'{parse_res.scheme}://{parse_res.netloc}{item_path}'
+    response = requests.get(item_url)
+    response.raise_for_status()  # raise an exception if the request fails.
+    content = response.json()
+    for asset_name, asset_content in content['assets'].items():
+        if 'DNB' in asset_name:
+            return int(asset_content['original_file_size'])
 
 def fetch_resource_size(url=None):
     response = requests.get(url, stream=True)
@@ -66,7 +67,7 @@ def should_download(blob_name: str=None, remote_file_url: str=None) -> bool:
     else:
         # remote file size
         remote_size = fetch_resource_size(url=remote_file_url)
-        original_size = get_dnb_file_size_from_meta(url=url)
+        original_size = get_dnb_original_file_size(url=url)
         return not remote_size == original_size
 
 
