@@ -320,13 +320,15 @@ def push_to_stac(
     )
 
     items = monthly_catalog.get_items(item_id)
+
     for item in items:
         if item.id == daily_dnb_item.id:
             logger.info(f'updating item id {item.id}')
             monthly_catalog.remove_item(item_id=item.id)
     link = monthly_catalog.add_item(daily_dnb_item)
     link.extra_fields = {'date':item_date.strftime('%Y%m%d')}
-
+    #sort item links so the updated item is not last
+    monthly_catalog.links = sorted(monthly_catalog.links, key=lambda e: os.path.split(e.href)[-1])
     item_datetime = daily_dnb_item.datetime
     temporal_extent = nighttime_collection.extent.temporal
 
