@@ -71,11 +71,8 @@ async def download_file(file_url=None, no_attempts=3, connect_timeout=250, data_
                                     logger.debug(f'Returning local file {dst_file_path}')
                                     return dst_file_path
                                 else:
+                                    os.remove(dst_file_path)
 
-                                    print(dst_file_path, os.path.getsize(dst_file_path), remote_size, os.path.getsize(dst_file_path)/remote_size*100)
-                                    #exit()
-                                    #os.remove(dst_file_path)
-                                    return dst_file_path
 
                             progressbar = tqdm.tqdm(total=remote_size, desc=f'Downloading {dst_file_path}', unit='iB',
                                                     unit_scale=True)

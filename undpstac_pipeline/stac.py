@@ -338,7 +338,7 @@ def push_to_stac(
 
     logger.info('Saving STAC structure to Azure')
     root_catalog.make_all_asset_hrefs_relative()
-    root_catalog.save(stac_io=az_stacio)
+    root_catalog.save(stac_io=az_stacio, )
 
 
 

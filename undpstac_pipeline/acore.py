@@ -11,7 +11,7 @@ import tqdm
 from osgeo import gdal
 from osgeo import gdal_array
 from undpstac_pipeline.validate import validate
-from undpstac_pipeline.azblob import  upload_file_to_blob, blob_exists_in_azure
+from undpstac_pipeline.azblob import  upload_file_to_blob
 from undpstac_pipeline.stac import  push_to_stac
 import math
 gdal.UseExceptions()
@@ -432,7 +432,6 @@ async def process_nighttime_data(date: datetime.date = None,
             will_download=should_download(blob_name=cog_dnb_blob_path,remote_file_url=remote_dnb_file)
         if will_download:
             logger.info(f'Processing nighttime lights from Colorado EOG for {date}')
-            _, azure_dnb_url = blob_exists_in_azure(cog_dnb_blob_path)
             remote_dnb_file_size = fetch_resource_size(remote_dnb_file)
 
             ################### download from remote  ########################
