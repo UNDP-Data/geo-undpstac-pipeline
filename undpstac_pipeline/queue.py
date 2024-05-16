@@ -96,6 +96,8 @@ async def process_message_from_queue(quene_name: str,
     async with ServiceBusClient.from_connection_string(
             conn_str=connection_string,
             logging_enable=True) as servicebus_client:
+
+        auto_lock_renewer = AutoLockRenewer()
         async with servicebus_client:
             # get the Queue Receiver object for the queue
             async with servicebus_client.get_queue_receiver(queue_name=quene_name) as receiver:
@@ -131,68 +133,67 @@ async def process_message_from_queue(quene_name: str,
                         target_date = datetime.strptime(date_string, '%Y%m%d')
 
                         if type_name == "nighttime":
-                            async with AutoLockRenewer() as auto_lock_renewer:
-                                auto_lock_renewer.register(
-                                    receiver=receiver, renewable=msg
+                            # auto_lock_renewer.register(
+                            #     receiver=receiver, renewable=msg
+                            # )
+
+                            pipeline_task = asyncio.create_task(
+                                process_nighttime_data(
+                                    date=target_date,
+                                    lonmin=lonmin, latmin=latmin, lonmax=lonmax, latmax=latmax,
+                                    force_processing=is_force
                                 )
+                            )
+                            pipeline_task.set_name('pipeline')
 
-                                pipeline_task = asyncio.create_task(
-                                    process_nighttime_data(
-                                        date=target_date,
-                                        lonmin=lonmin, latmin=latmin, lonmax=lonmax, latmax=latmax,
-                                        force_processing=is_force
-                                    )
-                                )
-                                pipeline_task.set_name('pipeline')
+                            timeout_event = multiprocessing.Event()
+                            lock_task = asyncio.create_task(
+                                handle_lock(receiver=receiver, message=msg, timeout_event=timeout_event)
+                            )
+                            lock_task.set_name('lock')
 
-                                timeout_event = multiprocessing.Event()
-                                lock_task = asyncio.create_task(
-                                    handle_lock(receiver=receiver, message=msg, timeout_event=timeout_event)
-                                )
-                                lock_task.set_name('lock')
+                            done, pending = await asyncio.wait(
+                                [lock_task, pipeline_task],
+                                return_when=asyncio.FIRST_COMPLETED,
+                                timeout=PIPELINE_TIMEOUT,
+                            )
+                            if len(done) == 0:
+                                error_message = f'Pipeline has timed out after {PIPELINE_TIMEOUT} seconds.'
+                                logger.error(error_message)
+                                timeout_event.set()
 
-                                done, pending = await asyncio.wait(
-                                    [lock_task, pipeline_task],
-                                    return_when=asyncio.FIRST_COMPLETED,
-                                    timeout=PIPELINE_TIMEOUT,
-                                )
-                                if len(done) == 0:
-                                    error_message = f'Pipeline has timed out after {PIPELINE_TIMEOUT} seconds.'
-                                    logger.error(error_message)
-                                    timeout_event.set()
+                            logger.debug(f'Handling done tasks')
+                            for done_future in done:
+                                try:
+                                    logger.info(f"Start processing {str(target_date)} for {type_name}")
+                                    await done_future
+                                    await receiver.complete_message(msg)
+                                    logger.info(f"Completed processing {str(target_date)} for å{type_name}")
 
-                                logger.debug(f'Handling done tasks')
-                                for done_future in done:
-                                    try:
-                                        logger.info(f"Start processing {str(target_date)} for {type_name}")
-                                        await done_future
-                                        await receiver.complete_message(msg)
-                                        logger.info(f"Completed processing {str(target_date)} for å{type_name}")
+                                except Exception as e:
+                                    with StringIO() as m:
+                                        print_exc(file=m)
+                                        em = m.getvalue()
+                                        logger.error(f'done future error {em}')
 
-                                    except Exception as e:
+                            logger.debug(f'Cancelling pending tasks')
+
+                            for pending_future in pending:
+                                try:
+                                    pending_future.cancel()
+                                    await pending_future
+
+                                except asyncio.exceptions.CancelledError as e:
+                                    # deadletter if task_name is ingest task: name == ingest
+                                    future_name = pending_future.get_name()
+                                    if future_name == 'pipeline':
                                         with StringIO() as m:
                                             print_exc(file=m)
                                             em = m.getvalue()
-                                            logger.error(f'done future error {em}')
-
-                                logger.debug(f'Cancelling pending tasks')
-
-                                for pending_future in pending:
-                                    try:
-                                        pending_future.cancel()
-                                        await pending_future
-
-                                    except asyncio.exceptions.CancelledError as e:
-                                        # deadletter if task_name is ingest task: name == ingest
-                                        future_name = pending_future.get_name()
-                                        if future_name == 'pipeline':
-                                            with StringIO() as m:
-                                                print_exc(file=m)
-                                                em = m.getvalue()
-                                                logger.error(f"Pushing message of {msg_str} to dead-letter sub-queue")
-                                                await receiver.dead_letter_message(
-                                                    msg, reason="pipeline task error", error_description=em
-                                                )
+                                            logger.error(f"Pushing message of {msg_str} to dead-letter sub-queue")
+                                            await receiver.dead_letter_message(
+                                                msg, reason="pipeline task error", error_description=em
+                                            )
 
                         else:
                             logger.info(f"Pushing {msg} to dead-letter sub-queue")
@@ -200,3 +201,4 @@ async def process_message_from_queue(quene_name: str,
                                 msg, reason=f"invalid data type of {type_name}"
                             )
                             continue
+    await auto_lock_renewer.close()
