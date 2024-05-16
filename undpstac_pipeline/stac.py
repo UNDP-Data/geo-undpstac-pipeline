@@ -307,6 +307,7 @@ def push_to_stac(
             description=f'VIIRS DNB nighttime lights nightly mosaics in {year}-{month}'
         )
         yearly_catalog.add_child(monthly_catalog)
+        #yearly_catalog.links = sorted(yearly_catalog.links, key=lambda e: os.path.split(e.href)[-1])
 
     item_id = f'SVDNB_npp_d{item_date.strftime("%Y%m%d")}'
     daily_dnb_item = create_dnb_stac_raster_item(
