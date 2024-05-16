@@ -145,6 +145,8 @@ def create_dnb_stac_raster_item(
             key=ftype,
             asset=asset,
         )
+    item.set_self_href(azure_blob_client.url)
+    item.make_asset_hrefs_relative()
     return item
 
 
@@ -305,6 +307,7 @@ def push_to_stac(
             description=f'VIIRS DNB nighttime lights nightly mosaics in {year}-{month}'
         )
         yearly_catalog.add_child(monthly_catalog)
+        #yearly_catalog.links = sorted(yearly_catalog.links, key=lambda e: os.path.split(e.href)[-1])
 
     item_id = f'SVDNB_npp_d{item_date.strftime("%Y%m%d")}'
     daily_dnb_item = create_dnb_stac_raster_item(
@@ -316,14 +319,17 @@ def push_to_stac(
         original_size_bytes=original_size_bytes
 
     )
+
     items = monthly_catalog.get_items(item_id)
+
     for item in items:
         if item.id == daily_dnb_item.id:
             logger.info(f'updating item id {item.id}')
             monthly_catalog.remove_item(item_id=item.id)
     link = monthly_catalog.add_item(daily_dnb_item)
     link.extra_fields = {'date':item_date.strftime('%Y%m%d')}
-
+    #sort item links so the updated item is not last
+    monthly_catalog.links = sorted(monthly_catalog.links, key=lambda e: os.path.split(e.href)[-1])
     item_datetime = daily_dnb_item.datetime
     temporal_extent = nighttime_collection.extent.temporal
 
@@ -332,131 +338,14 @@ def push_to_stac(
         nighttime_collection.extent.temporal = temporal_extent
     else:
         update_temporal_extent(item_datetime=item_datetime, temporal_extent=temporal_extent)
-
+    logger.info(f'...normalizing links')
     root_catalog.normalize_hrefs(root_href=az_stacio.container_client.url,
-                                 strategy=CustomLayoutStrategy(catalog_func=catalog_f, item_func=item_f))
+                                 strategy=CustomLayoutStrategy(catalog_func=catalog_f, item_func=item_f),
+                                 skip_unresolved=True) # skip unresolved is essential as it will skip
+    # saving any children or items which have not been changed
 
     logger.info('Saving STAC structure to Azure')
-    root_catalog.make_all_asset_hrefs_relative()
     root_catalog.save(stac_io=az_stacio, )
-
-
-
-def update_undp_stac(
-        daily_dnb_blob_path=None,
-        daily_dnb_cloudmask_blob_path=None,
-        file_type=None,
-        collection_folder=const.AZURE_DNB_COLLECTION_FOLDER,
-        bbox=None,
-        footprint=None
-    ):
-    """
-
-    :param blob_path:
-    :param container_name:
-    :param collection_folder:
-    :return:
-    """
-    az_stacio = AzureStacIO()
-
-    root_catalog_blob_path = const.STAC_CATALOG_NAME
-    root_catalog_url = os.path.join(az_stacio.container_client.url, root_catalog_blob_path)
-    root_catalog_exists, url = blob_exists_in_azure(blob_path=root_catalog_blob_path, container_client=az_stacio.container_client)
-
-    if not root_catalog_exists :
-        root_catalog = create_undp_stac_tree()
-    else:
-        logger.info(f'...reading ROOT STAC catalog from {root_catalog_url} ')
-        root_catalog = pystac.Catalog.from_file(root_catalog_url,stac_io=az_stacio)
-
-    collection_ids = [e.id for e in root_catalog.get_collections()]
-    assert collection_folder in collection_ids, f'{collection_folder} collection does not exist. Something enexpected happened!'
-
-    nighttime_collection = root_catalog.get_child(collection_folder)
-
-    pth, blob_name = os.path.split(daily_dnb_blob_path)
-    item_date = u.extract_date_from_dnbfile(blob_name)
-    year = item_date.strftime('%Y')
-    month = item_date.strftime('%m')
-    day = item_date.strftime('%d')
-    time_el = []
-    time_path_catalog = None
-
-
-    for time_unit in year, month:
-        time_el.append(time_unit)
-        time_id = '-'.join(time_el)
-        time_path_id = f'{collection_folder}-{time_id}'
-        time_path_catalog = nighttime_collection.get_child(time_path_id, recursive=True)
-        catalog_exists = time_path_catalog is not None
-
-        if not catalog_exists:
-            time_path_catalog = create_stac_catalog(
-                id=time_path_id,
-                title=f'Nighttime lights in {time_id}',
-                description=f'VIIRS DNB nighttime lights nightly mosaics in {time_id}'
-            )
-
-            nelem = len(time_el)
-            if nelem == 1:
-                nighttime_collection.add_child(time_path_catalog)
-            else:
-                parent_id = f'{collection_folder}-{time_el[nelem-2]}'
-                parent = nighttime_collection.get_child(parent_id, recursive=True)
-                parent.add_child(time_path_catalog)
-
-
-
-
-    # dnb_year_catalog_blob_path = os.path.join(collection_folder, year, const.STAC_CATALOG_NAME)
-    # if not blob_exists_in_azure(dnb_year_catalog_blob_path):
-    #     year_catalog = create_stac_catalog(
-    #         id=f'nighttime-lights-{year}',
-    #         title=f'Nighttime lights in {year}'
-    #     )
-    # else:
-    #     year_catalog = pystac.Catalog.from_file(dnb_year_catalog_blob_path)
-    #
-    # dnb_year_month_catalog_blob_path = os.path.join(collection_folder, year, month, 'catalog.json')
-    # if not blob_exists_in_azure(dnb_year_month_catalog_blob_path):
-    #     year_month_catalog = create_stac_catalog(id=f'nighttime-lights-{year}-{month}', title=f'Nighttime lights in {year}-{month}')
-    # else:
-    #     year_month_catalog = pystac.Catalog.from_file(dnb_year_month_catalog_blob_path)
-
-    item_id = f'SVDNB_npp_d{item_date.strftime("%Y%m%d")}'
-    daily_dnb_item = create_dnb_stac_item(
-        item_id=item_id,
-        daily_dnb_blob_path=daily_dnb_blob_path,
-        daily_dnb_cloudmask_blob_path=daily_dnb_cloudmask_blob_path,
-        add_eo_extension=False,
-        az_stacio=az_stacio,
-        file_type=file_type,
-        bbox=bbox,
-        footprint=footprint
-    )
-
-    items = time_path_catalog.get_items(item_id,recursive=False)
-    for item in items:
-        if item.id == daily_dnb_item.id:
-            logger.info(f'updating item id {item.id}')
-            time_path_catalog.remove_item(item_id=item.id)
-    time_path_catalog.add_item(daily_dnb_item)
-
-    item_datetime = daily_dnb_item.datetime
-    temporal_extent = nighttime_collection.extent.temporal
-
-
-    if temporal_extent is None:
-        temporal_extent = pystac.TemporalExtent(intervals=[[item_datetime, item_datetime]])
-        nighttime_collection.extent.temporal = temporal_extent
-    else:
-        update_temporal_extent(item_datetime=item_datetime, temporal_extent=temporal_extent)
-    root_catalog.normalize_hrefs(root_href=az_stacio.container_client.url,
-                                 strategy=CustomLayoutStrategy(catalog_func=catalog_f, item_func=item_f))
-
-    logger.info('Saving STAC structure to Azure')
-    root_catalog.make_all_asset_hrefs_relative()
-    root_catalog.save(stac_io=az_stacio)
 
 
 
