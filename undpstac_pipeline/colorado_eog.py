@@ -8,7 +8,7 @@ import tqdm
 import urllib
 from undpstac_pipeline import const
 from typing import Dict, Literal
-
+import requests
 
 
 
@@ -30,7 +30,22 @@ def get_dnb_files(date=None, file_type=None) -> Dict[Literal[str], tuple]:
     :param file_type: the VIIRS DNB file type (regular or sunfiltered)
     :return: dict where key is file type and value is a tuple holding file url and descr
     """
-    remote_dnb_file = compute_dnb_filename(date=date, file_type=file_type)
+    available_file_types = dict()
+    for ft in const.DNB_FILE_TYPES:
+        if ft.startswith('DNB'):
+            remote_dnb_file = compute_dnb_filename(date=date, file_type=ft)
+            response = requests.get(remote_dnb_file, stream=True)
+            try:
+                response.raise_for_status()  # raise an exception if the request fails.
+                available_file_types[ft] = remote_dnb_file
+            except requests.exceptions.HTTPError:
+                continue
+    if file_type in available_file_types:
+        remote_dnb_file = available_file_types[file_type]
+    else:
+        (file_type, remote_dnb_file), = available_file_types.items()
+
+
     file_type_desc = const.DNB_FILE_TYPES_DESC[file_type]
     dnb_file_desc = f'{file_type_desc} for {date}'
     remote_dnb_cloudmask_file = compute_dnb_filename(date=date, file_type=const.DNB_FILE_TYPES['CLOUD_COVER'])

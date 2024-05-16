@@ -412,12 +412,12 @@ async def process_nighttime_data(date: datetime.date = None,
 
         remote_dnb_files = get_dnb_files(date=date,file_type=file_type)
 
-
         dnb_file_names = dict()
         azure_dnb_cogs =  dict()
         downloaded_dnb_files = dict()
         local_cog_files = dict()
         for k, v in remote_dnb_files.items():
+            if k.startswith('DNB') and k != file_type: file_type = k # the requested file type was automatically replaced by available
             furl, fdesc = v
             _, fname = os.path.split(furl)
             dnb_file_names[k] = fname
