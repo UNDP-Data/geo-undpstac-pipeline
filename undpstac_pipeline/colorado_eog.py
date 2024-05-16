@@ -73,6 +73,7 @@ async def download_file(file_url=None, no_attempts=3, connect_timeout=250, data_
                                 else:
                                     os.remove(dst_file_path)
 
+
                             progressbar = tqdm.tqdm(total=remote_size, desc=f'Downloading {dst_file_path}', unit='iB',
                                                     unit_scale=True)
                             async with aiofiles.open(dst_file_path, 'wb') as local_file:

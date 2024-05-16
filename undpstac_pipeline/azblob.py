@@ -2,7 +2,6 @@ import os
 from azure.storage.blob import BlobServiceClient, ContentSettings, ContainerClient
 from undpstac_pipeline.const import AZURE_CONTAINER_NAME, AZURE_STORAGE_CONNECTION_STRING
 import logging
-import math
 from tqdm import tqdm
 logger = logging.getLogger(__name__)
 
@@ -54,6 +53,7 @@ def upload_file_to_blob(
                 overwrite=overwrite,
                 content_settings=ContentSettings(content_type=content_type) if content_type else None,
                 max_concurrency=max_concurrency,
+                connection_timeout=300
 
             )
 
