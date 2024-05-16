@@ -49,7 +49,7 @@ def get_dnb_original_file_size(url=None):
     content = response.json()
     for asset_name, asset_content in content['assets'].items():
         if 'DNB' in asset_name:
-            return int(asset_content['original_file_size'])
+            return int(asset_content['original_size_bytes'])
 
 def fetch_resource_size(url=None):
     response = requests.get(url, stream=True)
