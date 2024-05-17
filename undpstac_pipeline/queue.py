@@ -141,7 +141,9 @@ async def process_message_from_queue(quene_name: str,
                                 process_nighttime_data(
                                     date=target_date,
                                     lonmin=lonmin, latmin=latmin, lonmax=lonmax, latmax=latmax,
-                                    force_processing=is_force
+                                    force_processing=is_force,
+                                    DOWNLOAD_TIMEOUT=PIPELINE_TIMEOUT,
+                                    CONVERT_TIMEOUT=PIPELINE_TIMEOUT,
                                 )
                             )
                             pipeline_task.set_name('pipeline')
@@ -161,29 +163,18 @@ async def process_message_from_queue(quene_name: str,
                                 error_message = f'Pipeline has timed out after {PIPELINE_TIMEOUT} seconds.'
                                 logger.error(error_message)
                                 timeout_event.set()
+                                logger.error(f"Pushing message of {msg_str} to dead-letter sub-queue")
+                                await receiver.dead_letter_message(
+                                    msg, reason="pipeline task error", error_description=em
+                                )
 
-                            logger.debug(f'Handling done tasks')
-                            for done_future in done:
-                                try:
-                                    logger.info(f"Start processing {str(target_date)} for {type_name}")
-                                    await done_future
-                                    await receiver.complete_message(msg)
-                                    logger.info(f"Completed processing {str(target_date)} for å{type_name}")
-
-                                except Exception as e:
-                                    with StringIO() as m:
-                                        print_exc(file=m)
-                                        em = m.getvalue()
-                                        logger.error(f'done future error {em}')
-
-                            logger.debug(f'Cancelling pending tasks')
-
+                            pm = []
                             for pending_future in pending:
                                 try:
                                     pending_future.cancel()
                                     await pending_future
-
                                 except asyncio.exceptions.CancelledError as e:
+                                    pm.append(str(e))
                                     # deadletter if task_name is ingest task: name == ingest
                                     future_name = pending_future.get_name()
                                     if future_name == 'pipeline':
@@ -194,7 +185,16 @@ async def process_message_from_queue(quene_name: str,
                                             await receiver.dead_letter_message(
                                                 msg, reason="pipeline task error", error_description=em
                                             )
-
+                            dm = []
+                            for done_future in done:
+                                try:
+                                    await done_future
+                                    await receiver.complete_message(msg)
+                                    logger.info(f"Completed processing {str(target_date)} for å{type_name}")
+                                except Exception as e:
+                                    dm.append(str(e))
+                            if pm: raise Exception('\n'.join(pm))
+                            if dm: raise Exception('\n'.join(dm))
                         else:
                             logger.info(f"Pushing {msg} to dead-letter sub-queue")
                             await receiver.dead_letter_message(
