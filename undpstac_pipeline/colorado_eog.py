@@ -38,6 +38,7 @@ def get_dnb_files(date=None, file_type=None) -> Dict[Literal[str], tuple]:
             try:
                 response.raise_for_status()  # raise an exception if the request fails.
                 available_file_types[ft] = remote_dnb_file
+                break
             except requests.exceptions.HTTPError:
                 continue
     if file_type in available_file_types:
