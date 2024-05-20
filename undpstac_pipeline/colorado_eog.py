@@ -31,7 +31,7 @@ def get_dnb_files(date=None, file_type=None) -> Dict[Literal[str], tuple]:
     :return: dict where key is file type and value is a tuple holding file url and descr
     """
     available_file_types = dict()
-    for ft in const.DNB_FILE_TYPES:
+    for ft in sorted(const.DNB_FILE_TYPES, reverse=True):
         if ft.startswith('DNB'):
             remote_dnb_file = compute_dnb_filename(date=date, file_type=ft)
             response = requests.get(remote_dnb_file, stream=True)
