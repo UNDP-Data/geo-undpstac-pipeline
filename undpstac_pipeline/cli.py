@@ -6,14 +6,16 @@ import asyncio
 
 import sys
 from undpstac_pipeline.acore import process_nighttime_data
+from undpstac_pipeline.fix import update_stac_items
 from undpstac_pipeline.queue import process_message_from_queue
 
 
-def addCommonArguments(parser):
-    parser.add_argument('--lonmin', type=float, help='The western bound', required=False, default=-180)
-    parser.add_argument('--latmin', type=float, help='The southern bound', required=False, default=-65)
-    parser.add_argument('--lonmax', type=float, help='The eastern bound', required=False, default=180)
-    parser.add_argument('--latmax', type=float, help='The northern bound', required=False, default=75)
+def addCommonArguments(parser, skip_bbox=False):
+    if skip_bbox:
+        parser.add_argument('--lonmin', type=float, help='The western bound', required=False, default=-180)
+        parser.add_argument('--latmin', type=float, help='The southern bound', required=False, default=-65)
+        parser.add_argument('--lonmax', type=float, help='The eastern bound', required=False, default=180)
+        parser.add_argument('--latmax', type=float, help='The northern bound', required=False, default=75)
 
     parser.add_argument('-f', '--force', type=bool, action=argparse.BooleanOptionalAction,
                               help='Ignore exiting COG and process again', required=False)
@@ -71,6 +73,14 @@ async def main():
     )
     addCommonArguments(busqueue_parser)
 
+    fix_parser = subparsers.add_parser(
+        name="fix",
+        help="Run the pipeline in fix mode",
+        description="Update original file size in item.json",
+        usage="python -m undpstac_pipeline.cli fix"
+    )
+    addCommonArguments(fix_parser, True)
+
     args = parser.parse_args(args=None if sys.argv[1:] else ['--help'])
     if args.log_level:
         logger.setLevel(args.log_level)
@@ -103,6 +113,9 @@ async def main():
         await process_message_from_queue(servicebus_queue_name, servicebus_conn_str,
                                         lonmin=args.lonmin, latmin=args.latmin, lonmax=args.lonmax, latmax=args.latmax,
                                         force_processing=args.force)
+
+    if args.mode == 'fix':
+        update_stac_items()
 
 def run_pipeline():
     logger = logging.getLogger(__name__)
