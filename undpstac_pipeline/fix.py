@@ -33,22 +33,15 @@ def update_stac_items():
                 remote_dnb_url = compute_dnb_filename(date=item_date, file_type=asset_name)
                 original_size_bytes = fetch_resource_size(url=remote_dnb_url)
 
-                logger.info(f'checked asset {asset_name} (size: {original_size_bytes}) in {str(item_date)}')
+                logger.debug(f'checked asset {asset_name} (size: {original_size_bytes}) in {str(item_date)}')
 
                 asset = item.assets[asset_name]
-                current_size = asset.extra_fields.get('original_file_size')
-                if current_size and current_size == original_size_bytes:
-                    logger.info(f'Skipped. original_file_size of {asset_name} is not changed. Size: {original_size_bytes}')
-                    continue
-
-                logger.info(f'Updated original_file_size of {asset_name} to {original_size_bytes}')
                 asset.extra_fields['original_file_size'] = original_size_bytes
+                logger.debug(f'Updated original_file_size of {asset_name} to {original_size_bytes}')
             except KeyError:
                 pass
 
     logger.info('Saving STAC structure to Azure')
-    root_catalog.make_all_asset_hrefs_relative()
-
     root_catalog.normalize_hrefs(root_href=az_stacio.container_client.url,
                                  strategy=CustomLayoutStrategy(catalog_func=catalog_f, item_func=item_f))
 

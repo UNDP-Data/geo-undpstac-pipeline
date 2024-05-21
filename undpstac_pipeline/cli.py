@@ -10,13 +10,11 @@ from undpstac_pipeline.fix import update_stac_items
 from undpstac_pipeline.queue import process_message_from_queue
 
 
-def addCommonArguments(parser, skip_bbox=False):
-    if skip_bbox:
-        parser.add_argument('--lonmin', type=float, help='The western bound', required=False, default=-180)
-        parser.add_argument('--latmin', type=float, help='The southern bound', required=False, default=-65)
-        parser.add_argument('--lonmax', type=float, help='The eastern bound', required=False, default=180)
-        parser.add_argument('--latmax', type=float, help='The northern bound', required=False, default=75)
-
+def addCommonArguments(parser):
+    parser.add_argument('--lonmin', type=float, help='The western bound', required=False, default=-180)
+    parser.add_argument('--latmin', type=float, help='The southern bound', required=False, default=-65)
+    parser.add_argument('--lonmax', type=float, help='The eastern bound', required=False, default=180)
+    parser.add_argument('--latmax', type=float, help='The northern bound', required=False, default=75)
     parser.add_argument('-f', '--force', type=bool, action=argparse.BooleanOptionalAction,
                               help='Ignore exiting COG and process again', required=False)
     parser.add_argument('-l', '--log-level', help='Set log level ', type=str, choices=['INFO', 'DEBUG', 'TRACE'],
@@ -79,7 +77,8 @@ async def main():
         description="Update original file size in item.json",
         usage="python -m undpstac_pipeline.cli fix"
     )
-    addCommonArguments(fix_parser, True)
+    fix_parser.add_argument('-l', '--log-level', help='Set log level ', type=str, choices=['INFO', 'DEBUG', 'TRACE'],
+                        default='INFO')
 
     args = parser.parse_args(args=None if sys.argv[1:] else ['--help'])
     if args.log_level:
