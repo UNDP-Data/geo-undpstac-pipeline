@@ -32,12 +32,9 @@ def update_stac_items():
             try:
                 remote_dnb_url = compute_dnb_filename(date=item_date, file_type=asset_name)
                 original_size_bytes = fetch_resource_size(url=remote_dnb_url)
-
-                logger.debug(f'checked asset {asset_name} (size: {original_size_bytes}) in {str(item_date)}')
-
                 asset = item.assets[asset_name]
                 asset.extra_fields['original_file_size'] = original_size_bytes
-                logger.debug(f'Updated original_file_size of {asset_name} to {original_size_bytes}')
+                logger.debug(f'Updated original_file_size of {asset_name} to {original_size_bytes} in {str(item_date)}')
             except KeyError:
                 pass
 
