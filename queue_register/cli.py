@@ -125,7 +125,6 @@ async def main():
         yesterday = datetime.datetime.now().date() - datetime.timedelta(days=1)
         await send_message(data_type, [yesterday], args.force)
     elif args.mode == 'recent':
-
         n_days = int(args.number)
         if n_days < 1:
             raise argparse.ArgumentTypeError("-n/--number must be greater than zero.")

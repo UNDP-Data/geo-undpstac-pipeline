@@ -1,11 +1,18 @@
+import asyncio
+import json
 import logging
+import multiprocessing
 import re
 from datetime import datetime
-from azure.servicebus.aio import ServiceBusClient
+from io import StringIO
+from traceback import print_exc
+
+from azure.servicebus.aio import AutoLockRenewer, ServiceBusClient
 from undpstac_pipeline.acore import process_nighttime_data
 
 logger = logging.getLogger(__name__)
 
+PIPELINE_TIMEOUT = 3600
 acceptable_types = [
     "nighttime"
 ]
@@ -41,6 +48,35 @@ def validate_message(msg):
     else:
         return False
 
+async def handle_lock(receiver=None, message=None, timeout_event: multiprocessing.Event = None):
+    """
+    Renew  the AutolockRenewer lock registered on a servicebus message.
+    Long running jobs and with unpredictable execution duration  pose few chalenges.
+    First, the network can be disconnected or face other issues and second the renewal operation
+    can also fail or take a bit longer. For this reason  to keep an AzureService bus locked
+    it is necessary to renew the lock in an infinite loop
+    @param receiver, instance of Azure ServiceBusReceiver
+    @param message,instance or Azure ServiceBusReceivedMessage
+
+    @return: None
+    """
+
+    while True:
+        lu = message.locked_until_utc
+        n = datetime.utcnow()
+        d = int((lu.replace(tzinfo=n.tzinfo) - n).total_seconds())
+        # logger.debug(f'locked until {lu} utc now is {n} lock expired {message._lock_expired} and will expire in  {d}')
+        if d < 10:
+            logger.debug('renewing lock')
+            try:
+
+                await receiver.renew_message_lock(message=message, )
+            except Exception as e:
+                timeout_event.is_set()
+                # it is questionable whether the exception should be propagated
+                raise
+        await asyncio.sleep(1)
+
 async def process_message_from_queue(quene_name: str,
                                      connection_string: str,
                                      lonmin: float = None,
@@ -60,6 +96,8 @@ async def process_message_from_queue(quene_name: str,
     async with ServiceBusClient.from_connection_string(
             conn_str=connection_string,
             logging_enable=True) as servicebus_client:
+
+        auto_lock_renewer = AutoLockRenewer()
         async with servicebus_client:
             # get the Queue Receiver object for the queue
             async with servicebus_client.get_queue_receiver(queue_name=quene_name) as receiver:
@@ -95,17 +133,72 @@ async def process_message_from_queue(quene_name: str,
                         target_date = datetime.strptime(date_string, '%Y%m%d')
 
                         if type_name == "nighttime":
-                            # flag message as completed since it cannot be locked for long time
-                            await receiver.complete_message(msg)
-                            logger.info(f"Start processing {str(target_date)} for {type_name}")
-                            await process_nighttime_data(
-                                date=target_date,
-                                lonmin=lonmin, latmin=latmin, lonmax=lonmax, latmax=latmax,
-                                force_processing=is_force)
-                            logger.info(f"Completed processing {str(target_date)} for å{type_name}")
+                            # auto_lock_renewer.register(
+                            #     receiver=receiver, renewable=msg
+                            # )
+
+                            pipeline_task = asyncio.create_task(
+                                process_nighttime_data(
+                                    date=target_date,
+                                    lonmin=lonmin, latmin=latmin, lonmax=lonmax, latmax=latmax,
+                                    force_processing=is_force,
+                                    DOWNLOAD_TIMEOUT=PIPELINE_TIMEOUT,
+                                    CONVERT_TIMEOUT=PIPELINE_TIMEOUT,
+                                )
+                            )
+                            pipeline_task.set_name('pipeline')
+
+                            timeout_event = multiprocessing.Event()
+                            lock_task = asyncio.create_task(
+                                handle_lock(receiver=receiver, message=msg, timeout_event=timeout_event)
+                            )
+                            lock_task.set_name('lock')
+
+                            done, pending = await asyncio.wait(
+                                [lock_task, pipeline_task],
+                                return_when=asyncio.FIRST_COMPLETED,
+                                timeout=PIPELINE_TIMEOUT,
+                            )
+                            if len(done) == 0:
+                                error_message = f'Pipeline has timed out after {PIPELINE_TIMEOUT} seconds.'
+                                logger.error(error_message)
+                                timeout_event.set()
+                                logger.error(f"Pushing message of {msg_str} to dead-letter sub-queue")
+                                await receiver.dead_letter_message(
+                                    msg, reason="pipeline task error", error_description=em
+                                )
+
+                            pm = []
+                            for pending_future in pending:
+                                try:
+                                    pending_future.cancel()
+                                    await pending_future
+                                except asyncio.exceptions.CancelledError as e:
+                                    pm.append(str(e))
+                                    # deadletter if task_name is ingest task: name == ingest
+                                    future_name = pending_future.get_name()
+                                    if future_name == 'pipeline':
+                                        with StringIO() as m:
+                                            print_exc(file=m)
+                                            em = m.getvalue()
+                                            logger.error(f"Pushing message of {msg_str} to dead-letter sub-queue")
+                                            await receiver.dead_letter_message(
+                                                msg, reason="pipeline task error", error_description=em
+                                            )
+                            dm = []
+                            for done_future in done:
+                                try:
+                                    await done_future
+                                    await receiver.complete_message(msg)
+                                    logger.info(f"Completed processing {str(target_date)} for å{type_name}")
+                                except Exception as e:
+                                    dm.append(str(e))
+                            if pm: raise Exception('\n'.join(pm))
+                            if dm: raise Exception('\n'.join(dm))
                         else:
                             logger.info(f"Pushing {msg} to dead-letter sub-queue")
                             await receiver.dead_letter_message(
                                 msg, reason=f"invalid data type of {type_name}"
                             )
                             continue
+    await auto_lock_renewer.close()
