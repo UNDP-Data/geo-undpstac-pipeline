@@ -2,7 +2,7 @@ import multiprocessing
 import asyncio
 import numpy as np
 from undpstac_pipeline.utils import should_download, transform_bbox, fetch_resource_size
-from undpstac_pipeline.colorado_eog import get_dnb_files, download_file
+from undpstac_pipeline.colorado_eog import get_dnb_files, download_file, get_access_token
 from undpstac_pipeline.const import COG_DNB_FILE_TYPE, AZURE_DNB_COLLECTION_FOLDER, COG_CONVERT_TIMEOUT,AIOHTTP_READ_CHUNKSIZE, COG_DOWNLOAD_TIMEOUT
 import datetime
 import logging
@@ -411,7 +411,7 @@ async def process_nighttime_data(date: datetime.date = None,
     try:
 
         remote_dnb_files = get_dnb_files(date=date,file_type=file_type)
-
+        logger.info(remote_dnb_files)
         dnb_file_names = dict()
         azure_dnb_cogs =  dict()
         downloaded_dnb_files = dict()
@@ -425,11 +425,21 @@ async def process_nighttime_data(date: datetime.date = None,
 
         cog_dnb_blob_path = azure_dnb_cogs[file_type]
 
+        ################### get access token from EOG  ########################
+        eog_user = os.environ.get('EOG_USER')
+        eog_password = os.environ.get('EOG_PASSWORD')
+        access_token = await get_access_token(eog_user, eog_password)
+        logger.debug(f"access_token: {access_token}")
+
         remote_dnb_file = remote_dnb_files[file_type][0]
         if force_processing:
             will_download = force_processing
         else:
-            will_download=should_download(blob_name=cog_dnb_blob_path,remote_file_url=remote_dnb_file)
+            will_download=should_download(
+                blob_name=cog_dnb_blob_path,
+                remote_file_url=remote_dnb_file,
+                access_token=access_token)
+
         if will_download:
             logger.info(f'Processing nighttime lights from Colorado EOG for {date}')
             remote_dnb_file_size = fetch_resource_size(remote_dnb_file)
@@ -439,13 +449,12 @@ async def process_nighttime_data(date: datetime.date = None,
             for dnb_file_type, remote in remote_dnb_files.items():
                 dnb_file_url, fdesc = remote
                 download_task = asyncio.ensure_future(
-                    download_file(file_url=dnb_file_url, read_chunk_size=AIOHTTP_READ_CHUNKSIZE)
+                    download_file(file_url=dnb_file_url, read_chunk_size=AIOHTTP_READ_CHUNKSIZE, access_token=access_token,)
                 )
                 download_task.set_name(dnb_file_type)
                 download_futures.append(download_task)
             downloaded, not_downloaded = await asyncio.wait(download_futures, timeout=DOWNLOAD_TIMEOUT,
                                                    return_when=asyncio.FIRST_EXCEPTION)
-
             if downloaded:
                 m = []
                 for downloaded_future in downloaded:

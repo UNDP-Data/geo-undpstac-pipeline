@@ -57,12 +57,40 @@ def get_dnb_files(date=None, file_type=None) -> Dict[Literal[str], tuple]:
              const.DNB_FILE_TYPES['CLOUD_COVER']  : (remote_dnb_cloudmask_file, dnb_cloudmask_desc)
     }
 
+
+async def get_access_token(username, password):
+    """
+    Fetch an access token using username and password from EOG.
+    See how to fetch access token using username and password from EOG here.
+    https://eogdata.mines.edu/products/register/
+    """
+    token_url = 'https://eogauth.mines.edu/auth/realms/master/protocol/openid-connect/token'
+    client_id = 'eogdata_oidc'
+    client_secret = '2677ad81-521b-4869-8480-6d05b9e57d48'
+
+    async with aiohttp.ClientSession() as session:
+        payload = {
+            'client_id': client_id,
+            'client_secret': client_secret,
+            'username': username,
+            'password': password,
+            'grant_type': 'password'
+        }
+        async with session.post(token_url, data=payload) as response:
+            if response.status == 200:
+                data = await response.json()
+                return data.get('access_token')
+            else:
+                raise Exception(f"Failed to fetch access token: {response.status}, {await response.text()}")
+
+
 async def download_file(file_url=None, no_attempts=3, connect_timeout=250, data_read_timeout=9000,
-                        read_chunk_size=1024 * 10):
+                        read_chunk_size=1024 * 10, access_token=None):
     """
     https://eogdata.mines.edu/nighttime_light/nightly/rade9d_sunfiltered/SVDNB_npp_d20240206.rade9d_sunfiltered.tif
     :param file_url:
     :param no_attempts:
+    :param access_token EOG Access Token. See https://eogdata.mines.edu/products/register/
     :return:
     """
     try:
@@ -74,7 +102,10 @@ async def download_file(file_url=None, no_attempts=3, connect_timeout=250, data_
 
         timeout = aiohttp.ClientTimeout(connect=connect_timeout, sock_read=data_read_timeout)
 
-        async with aiohttp.ClientSession(timeout=timeout) as session:
+        headers = None
+        if access_token is not None:
+            headers = {"Authorization": f"Bearer {access_token}"}
+        async with aiohttp.ClientSession(headers=headers, timeout=timeout) as session:
             for attempt in range(no_attempts):
                 logger.info(f'Attempt no {attempt+1} to download {orig_file_name} from {pth}')
                 try:
