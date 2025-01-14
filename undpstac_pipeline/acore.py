@@ -409,9 +409,13 @@ async def process_nighttime_data(date: datetime.date = None,
     timeout_event = multiprocessing.Event()
 
     try:
+        ################### get access token from EOG  ########################
+        eog_user = os.environ.get('EOG_USER')
+        eog_password = os.environ.get('EOG_PASSWORD')
+        access_token = await get_access_token(eog_user, eog_password)
+        logger.debug(f"access_token: {access_token}")
 
-        remote_dnb_files = get_dnb_files(date=date,file_type=file_type)
-        logger.info(remote_dnb_files)
+        remote_dnb_files = get_dnb_files(date=date,file_type=file_type, access_token=access_token)
         dnb_file_names = dict()
         azure_dnb_cogs =  dict()
         downloaded_dnb_files = dict()
@@ -424,12 +428,6 @@ async def process_nighttime_data(date: datetime.date = None,
             azure_dnb_cogs[k] = os.path.join(AZURE_DNB_COLLECTION_FOLDER,year,month, day, fname)
 
         cog_dnb_blob_path = azure_dnb_cogs[file_type]
-
-        ################### get access token from EOG  ########################
-        eog_user = os.environ.get('EOG_USER')
-        eog_password = os.environ.get('EOG_PASSWORD')
-        access_token = await get_access_token(eog_user, eog_password)
-        logger.debug(f"access_token: {access_token}")
 
         remote_dnb_file = remote_dnb_files[file_type][0]
         if force_processing:
