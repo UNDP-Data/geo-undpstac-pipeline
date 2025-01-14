@@ -23,7 +23,7 @@ def compute_dnb_filename(date=None, file_type='DNB' ):
     file_name = const.FILE_TYPE_TEMPLATES[file_type].format(date=date.strftime('%Y%m%d'))
     return os.path.join(const.ROOT_EOG_URL,folder,file_name)
 
-def get_dnb_files(date=None, file_type=None) -> Dict[Literal[str], tuple]:
+def get_dnb_files(date=None, file_type=None, access_token=None) -> Dict[Literal[str], tuple]:
     """
     COmpute and return the name of files to download
     :param date: the date for whcig to compute the names
@@ -34,7 +34,10 @@ def get_dnb_files(date=None, file_type=None) -> Dict[Literal[str], tuple]:
     for ft in sorted(const.DNB_FILE_TYPES, reverse=True):
         if ft.startswith('DNB'):
             remote_dnb_file = compute_dnb_filename(date=date, file_type=ft)
-            response = requests.get(remote_dnb_file, stream=True)
+            headers = None
+            if access_token is not None:
+                headers = {'Authorization': f'Bearer {access_token}'}
+            response = requests.get(remote_dnb_file, stream=True, headers=headers)
             try:
                 response.raise_for_status()  # raise an exception if the request fails.
                 available_file_types[ft] = remote_dnb_file
@@ -57,12 +60,40 @@ def get_dnb_files(date=None, file_type=None) -> Dict[Literal[str], tuple]:
              const.DNB_FILE_TYPES['CLOUD_COVER']  : (remote_dnb_cloudmask_file, dnb_cloudmask_desc)
     }
 
+
+async def get_access_token(username, password):
+    """
+    Fetch an access token using username and password from EOG.
+    See how to fetch access token using username and password from EOG here.
+    https://eogdata.mines.edu/products/register/
+    """
+    token_url = 'https://eogauth.mines.edu/auth/realms/master/protocol/openid-connect/token'
+    client_id = 'eogdata_oidc'
+    client_secret = '2677ad81-521b-4869-8480-6d05b9e57d48'
+
+    async with aiohttp.ClientSession() as session:
+        payload = {
+            'client_id': client_id,
+            'client_secret': client_secret,
+            'username': username,
+            'password': password,
+            'grant_type': 'password'
+        }
+        async with session.post(token_url, data=payload) as response:
+            if response.status == 200:
+                data = await response.json()
+                return data.get('access_token')
+            else:
+                raise Exception(f"Failed to fetch access token: {response.status}, {await response.text()}")
+
+
 async def download_file(file_url=None, no_attempts=3, connect_timeout=250, data_read_timeout=9000,
-                        read_chunk_size=1024 * 10):
+                        read_chunk_size=1024 * 10, access_token=None):
     """
     https://eogdata.mines.edu/nighttime_light/nightly/rade9d_sunfiltered/SVDNB_npp_d20240206.rade9d_sunfiltered.tif
     :param file_url:
     :param no_attempts:
+    :param access_token EOG Access Token. See https://eogdata.mines.edu/products/register/
     :return:
     """
     try:
@@ -74,7 +105,10 @@ async def download_file(file_url=None, no_attempts=3, connect_timeout=250, data_
 
         timeout = aiohttp.ClientTimeout(connect=connect_timeout, sock_read=data_read_timeout)
 
-        async with aiohttp.ClientSession(timeout=timeout) as session:
+        headers = None
+        if access_token is not None:
+            headers = {"Authorization": f"Bearer {access_token}"}
+        async with aiohttp.ClientSession(headers=headers, timeout=timeout) as session:
             for attempt in range(no_attempts):
                 logger.info(f'Attempt no {attempt+1} to download {orig_file_name} from {pth}')
                 try:

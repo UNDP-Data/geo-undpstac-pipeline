@@ -34,7 +34,7 @@ def download_http_resurce(url: str=None, save_path: str=None, timeout=(25, 250))
         raise ValueError("Download failed")
     logger.info(f"Downloaded {url} to {save_path}")
 
-def get_dnb_original_file_size(url=None):
+def get_dnb_original_file_size(url=None, access_token=None):
     """
         Fetch the  original file size from metadata using GDAL Info
         The file szie and the time it was created is stored in COG metadata item
@@ -44,15 +44,23 @@ def get_dnb_original_file_size(url=None):
     item_root_url = parse_res.path.split('.')[0]
     item_path = f'{item_root_url}.json'
     item_url = f'{parse_res.scheme}://{parse_res.netloc}{item_path}'
-    response = requests.get(item_url)
+
+    headers = None
+    if access_token is not None:
+        headers = {'Authorization': f'Bearer {access_token}'}
+
+    response = requests.get(item_url, headers=headers)
     response.raise_for_status()  # raise an exception if the request fails.
     content = response.json()
     for asset_name, asset_content in content['assets'].items():
         if 'DNB' in asset_name:
             return int(asset_content['original_size_bytes'])
 
-def fetch_resource_size(url=None):
-    response = requests.get(url, stream=True)
+def fetch_resource_size(url=None, access_token=None):
+    headers = None
+    if access_token is not None:
+        headers = {'Authorization': f'Bearer {access_token}'}
+    response = requests.get(url, stream=True, headers=headers)
     response.raise_for_status()  # raise an exception if the request fails.
     return int(response.headers.get('content-length', 0))
 
@@ -60,14 +68,14 @@ def human_size(bytes, units=[' bytes','KB','MB','GB','TB', 'PB', 'EB']):
     """ Returns a human readable string representation of bytes """
     return str(bytes) + units[0] if bytes < 1024 else human_size(bytes>>10, units[1:])
 
-def should_download(blob_name: str=None, remote_file_url: str=None) -> bool:
+def should_download(blob_name: str=None, remote_file_url: str=None, access_token=None) -> bool:
     blob_exists, url = blob_exists_in_azure(blob_name)
     if not blob_exists:
         return True
     else:
         # remote file size
-        remote_size = fetch_resource_size(url=remote_file_url)
-        original_size = get_dnb_original_file_size(url=url)
+        remote_size = fetch_resource_size(url=remote_file_url, access_token=access_token)
+        original_size = get_dnb_original_file_size(url=url, access_token=access_token)
         return not remote_size == original_size
 
 
@@ -142,7 +150,6 @@ def get_bbox_and_footprint(raster_path=None):
 
     ])
     return src_srs.GetAuthorityCode(None), bbox, mapping(footprint)
-
 
 
 
