@@ -410,9 +410,11 @@ async def process_nighttime_data(date: datetime.date = None,
 
     try:
         ################### get access token from EOG  ########################
+        eog_client_id = os.environ.get('EOG_CLIENT_ID')
+        eog_client_secret = os.environ.get('EOG_CLIENT_SECRET')
         eog_user = os.environ.get('EOG_USER')
         eog_password = os.environ.get('EOG_PASSWORD')
-        access_token = await get_access_token(eog_user, eog_password)
+        access_token = await get_access_token(eog_client_id,eog_client_secret, eog_user, eog_password)
         logger.debug(f"access_token: {access_token}")
 
         remote_dnb_files = get_dnb_files(date=date,file_type=file_type, access_token=access_token)

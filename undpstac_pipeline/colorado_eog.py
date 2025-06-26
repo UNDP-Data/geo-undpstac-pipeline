@@ -61,15 +61,13 @@ def get_dnb_files(date=None, file_type=None, access_token=None) -> Dict[Literal[
     }
 
 
-async def get_access_token(username, password):
+async def get_access_token(client_id, client_secret, username, password):
     """
     Fetch an access token using username and password from EOG.
     See how to fetch access token using username and password from EOG here.
     https://eogdata.mines.edu/products/register/
     """
-    token_url = 'https://eogauth.mines.edu/auth/realms/master/protocol/openid-connect/token'
-    client_id = 'eogdata_oidc'
-    client_secret = '2677ad81-521b-4869-8480-6d05b9e57d48'
+    token_url = 'https://eogauth-new.mines.edu/realms/eog/protocol/openid-connect/token'
 
     async with aiohttp.ClientSession() as session:
         payload = {
